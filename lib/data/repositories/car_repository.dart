@@ -5,6 +5,7 @@ import '../models/car_model.dart';
 abstract class CarRepository {
   Future<List<CarModel>> fetchCars();
   Future<CarModel> createCar(CarModel car);
+  Future<CarModel> updateCar(CarModel car);
   Future<void> deleteCar(String id);
 }
 
@@ -28,6 +29,19 @@ class SupabaseCarRepository implements CarRepository {
     final response = await _client
         .from('cars')
         .insert(car.toInsertMap(ownerId: userId))
+        .select()
+        .single();
+    return CarModel.fromMap(response as Map<String, dynamic>);
+  }
+
+  @override
+  Future<CarModel> updateCar(CarModel car) async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) throw AuthException('Not authenticated');
+    final response = await _client
+        .from('cars')
+        .update(car.toInsertMap(ownerId: userId))
+        .eq('id', car.id)
         .select()
         .single();
     return CarModel.fromMap(response as Map<String, dynamic>);

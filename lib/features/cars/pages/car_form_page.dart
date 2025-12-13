@@ -6,7 +6,11 @@ import '../../../data/models/car_model.dart';
 import '../../../data/repositories/car_repository.dart';
 
 class CarFormPage extends StatefulWidget {
-  const CarFormPage({super.key});
+  const CarFormPage({super.key, this.car});
+
+  final CarModel? car;
+
+  bool get isEditing => car != null;
 
   @override
   State<CarFormPage> createState() => _CarFormPageState();
@@ -22,11 +26,17 @@ class _CarFormPageState extends State<CarFormPage> {
   // Лицензиат
   final _licenseOgrnController = TextEditingController();
   final _licenseInnController = TextEditingController();
-  final _licenseOkpoController = TextEditingController();
   final _licenseOrgNameController = TextEditingController();
   final _licenseOrgAddressController = TextEditingController();
   final _licensePhoneController = TextEditingController();
   final _licenseNumberController = TextEditingController();
+  final _licenseOkudController = TextEditingController();
+  final _garageNumberController = TextEditingController();
+  final _tabNumberController = TextEditingController();
+  final _snilsController = TextEditingController();
+  final _driverLicenseController = TextEditingController();
+  final _driverLicenseIssueController = TextEditingController();
+  final _driverLicenseExpireController = TextEditingController();
   DateTime? _licenseIssuedAt;
   OwnerType _ownerType = OwnerType.individual;
   bool _saving = false;
@@ -36,6 +46,23 @@ class _CarFormPageState extends State<CarFormPage> {
   void initState() {
     super.initState();
     _repository = SupabaseCarRepository(Supabase.instance.client);
+    if (widget.car != null) {
+      final car = widget.car!;
+      _ownerType = car.ownerType;
+      _nameController.text = car.displayName;
+      _plateController.text = car.plateNumber;
+      _vinController.text = car.vin ?? '';
+      _stsController.text = car.stsNumber ?? '';
+      _insuranceController.text = car.insuranceNumber ?? '';
+      _licenseOgrnController.text = car.licenseOgrn ?? '';
+      _licenseInnController.text = car.licenseInn ?? '';
+      _licenseOrgNameController.text = car.licenseOrgName ?? '';
+      _licenseOrgAddressController.text = car.licenseAddress ?? '';
+      _licensePhoneController.text = car.licensePhone ?? '';
+      _licenseNumberController.text = car.licenseNumber ?? '';
+      _licenseOkudController.text = car.licenseOkud ?? '';
+      _licenseIssuedAt = car.licenseIssuedAt;
+    }
   }
 
   @override
@@ -47,11 +74,17 @@ class _CarFormPageState extends State<CarFormPage> {
     _insuranceController.dispose();
     _licenseOgrnController.dispose();
     _licenseInnController.dispose();
-    _licenseOkpoController.dispose();
     _licenseOrgNameController.dispose();
     _licenseOrgAddressController.dispose();
     _licensePhoneController.dispose();
     _licenseNumberController.dispose();
+    _licenseOkudController.dispose();
+    _garageNumberController.dispose();
+    _tabNumberController.dispose();
+    _snilsController.dispose();
+    _driverLicenseController.dispose();
+    _driverLicenseIssueController.dispose();
+    _driverLicenseExpireController.dispose();
     super.dispose();
   }
 
@@ -59,42 +92,46 @@ class _CarFormPageState extends State<CarFormPage> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
-      await _repository.createCar(
-        CarModel(
-          id: '',
-          userId: '',
-          displayName: _nameController.text.trim(),
-          plateNumber: _plateController.text.trim(),
-          ownerType: _ownerType,
-          vin: _vinController.text.trim().isEmpty ? null : _vinController.text.trim(),
-          stsNumber: _stsController.text.trim().isEmpty ? null : _stsController.text.trim(),
-          insuranceNumber: _insuranceController.text.trim().isEmpty
-              ? null
-              : _insuranceController.text.trim(),
-          licenseOrgName: _licenseOrgNameController.text.trim().isEmpty
-              ? null
-              : _licenseOrgNameController.text.trim(),
-          licenseAddress: _licenseOrgAddressController.text.trim().isEmpty
-              ? null
-              : _licenseOrgAddressController.text.trim(),
-          licensePhone: _licensePhoneController.text.trim().isEmpty
-              ? null
-              : _licensePhoneController.text.trim(),
-          licenseNumber: _licenseNumberController.text.trim().isEmpty
-              ? null
-              : _licenseNumberController.text.trim(),
-          licenseOgrn: _licenseOgrnController.text.trim().isEmpty
-              ? null
-              : _licenseOgrnController.text.trim(),
-          licenseInn: _licenseInnController.text.trim().isEmpty
-              ? null
-              : _licenseInnController.text.trim(),
-          licenseOkpo: _licenseOkpoController.text.trim().isEmpty
-              ? null
-              : _licenseOkpoController.text.trim(),
-          licenseIssuedAt: _licenseIssuedAt,
-        ),
+      final payload = CarModel(
+        id: widget.car?.id ?? '',
+        userId: widget.car?.userId ?? '',
+        displayName: _nameController.text.trim(),
+        plateNumber: _plateController.text.trim(),
+        ownerType: _ownerType,
+        vin: _vinController.text.trim().isEmpty ? null : _vinController.text.trim(),
+        stsNumber: _stsController.text.trim().isEmpty ? null : _stsController.text.trim(),
+        insuranceNumber: _insuranceController.text.trim().isEmpty
+            ? null
+            : _insuranceController.text.trim(),
+        licenseOrgName: _licenseOrgNameController.text.trim().isEmpty
+            ? null
+            : _licenseOrgNameController.text.trim(),
+        licenseAddress: _licenseOrgAddressController.text.trim().isEmpty
+            ? null
+            : _licenseOrgAddressController.text.trim(),
+        licensePhone: _licensePhoneController.text.trim().isEmpty
+            ? null
+            : _licensePhoneController.text.trim(),
+        licenseNumber: _licenseNumberController.text.trim().isEmpty
+            ? null
+            : _licenseNumberController.text.trim(),
+        licenseOgrn: _licenseOgrnController.text.trim().isEmpty
+            ? null
+            : _licenseOgrnController.text.trim(),
+        licenseInn: _licenseInnController.text.trim().isEmpty
+            ? null
+            : _licenseInnController.text.trim(),
+        licenseOkud: _licenseOkudController.text.trim().isEmpty
+            ? null
+            : _licenseOkudController.text.trim(),
+        licenseIssuedAt: _licenseIssuedAt,
       );
+
+      if (widget.isEditing) {
+        await _repository.updateCar(payload);
+      } else {
+        await _repository.createCar(payload);
+      }
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } catch (error) {
@@ -109,7 +146,9 @@ class _CarFormPageState extends State<CarFormPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Добавить автомобиль')),
+      appBar: AppBar(
+        title: Text(widget.isEditing ? 'Редактировать автомобиль' : 'Добавить автомобиль'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Form(
@@ -195,21 +234,6 @@ class _CarFormPageState extends State<CarFormPage> {
               ),
               const SizedBox(height: 16),
               TextFormField(
-                controller: _licenseOkpoController,
-                keyboardType: TextInputType.number,
-                maxLength: 10,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'ОКПО',
-                  helperText:
-                      'До 10 цифр. Можно найти по ИНН организации.',
-                  helperMaxLines: 2,
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
                 controller: _licenseOrgNameController,
                 decoration: const InputDecoration(
                   labelText: 'Организация (лицензиат)',
@@ -229,6 +253,7 @@ class _CarFormPageState extends State<CarFormPage> {
               TextFormField(
                 controller: _licensePhoneController,
                 keyboardType: TextInputType.phone,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: const InputDecoration(
                   labelText: 'Телефон организации',
                   helperText:
@@ -239,10 +264,24 @@ class _CarFormPageState extends State<CarFormPage> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _licenseNumberController,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: const InputDecoration(
                   labelText: 'Номер лицензии на перевозку',
                   helperText:
                       'До 10 символов, цифры и "-", как 432754 или 324942-1.',
+                  helperMaxLines: 2,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _licenseOkudController,
+                maxLength: 20,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Форма по ОКУД',
+                  helperText: 'Например 0345001',
                   helperMaxLines: 2,
                 ),
               ),

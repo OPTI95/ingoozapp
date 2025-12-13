@@ -42,7 +42,7 @@ class CarModel {
     this.licenseNumber,
     this.licenseOgrn,
     this.licenseInn,
-    this.licenseOkpo,
+    this.licenseOkud,
     this.licenseIssuedAt,
   });
 
@@ -60,7 +60,7 @@ class CarModel {
   final String? licenseNumber;
   final String? licenseOgrn;
   final String? licenseInn;
-  final String? licenseOkpo;
+  final String? licenseOkud;
   final DateTime? licenseIssuedAt;
 
   factory CarModel.fromMap(Map<String, dynamic> map) {
@@ -79,7 +79,7 @@ class CarModel {
       licenseNumber: map['license_number'] as String?,
       licenseOgrn: map['license_ogrn'] as String?,
       licenseInn: map['license_inn'] as String?,
-      licenseOkpo: map['license_okpo'] as String?,
+      licenseOkud: map['license_okud'] as String?,
       licenseIssuedAt: map['license_issued_at'] != null
           ? DateTime.tryParse(map['license_issued_at'] as String)
           : null,
@@ -102,7 +102,7 @@ class CarModel {
       'license_number': licenseNumber,
       'license_ogrn': licenseOgrn,
       'license_inn': licenseInn,
-      'license_okpo': licenseOkpo,
+      'license_okud': licenseOkud,
       'license_issued_at': licenseIssuedAt?.toIso8601String(),
     };
   }
@@ -122,7 +122,7 @@ class CarModel {
       'license_number': licenseNumber,
       'license_ogrn': licenseOgrn,
       'license_inn': licenseInn,
-      'license_okpo': licenseOkpo,
+      'license_okud': licenseOkud,
       'license_issued_at': licenseIssuedAt?.toIso8601String(),
     };
   }
@@ -140,7 +140,7 @@ class CarModel {
     String? licenseNumber,
     String? licenseOgrn,
     String? licenseInn,
-    String? licenseOkpo,
+    String? licenseOkud,
     DateTime? licenseIssuedAt,
   }) {
     return CarModel(
@@ -158,7 +158,7 @@ class CarModel {
       licenseNumber: licenseNumber ?? this.licenseNumber,
       licenseOgrn: licenseOgrn ?? this.licenseOgrn,
       licenseInn: licenseInn ?? this.licenseInn,
-      licenseOkpo: licenseOkpo ?? this.licenseOkpo,
+      licenseOkud: licenseOkud ?? this.licenseOkud,
       licenseIssuedAt: licenseIssuedAt ?? this.licenseIssuedAt,
     );
   }

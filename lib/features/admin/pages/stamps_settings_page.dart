@@ -11,6 +11,9 @@ class StampsSettingsPage extends StatefulWidget {
 class _StampsSettingsPageState extends State<StampsSettingsPage> {
   final _techController = TextEditingController();
   final _medController = TextEditingController();
+  final _medFooterController = TextEditingController();
+  final _okpoController = TextEditingController();
+
   bool _loading = true;
   bool _saving = false;
   bool _noAccess = false;
@@ -25,6 +28,8 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
   void dispose() {
     _techController.dispose();
     _medController.dispose();
+    _medFooterController.dispose();
+    _okpoController.dispose();
     super.dispose();
   }
 
@@ -52,7 +57,7 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
       final response = await client
           .from('stamps')
           .select('key, value')
-          .inFilter('key', ['tech_pre', 'med_pre']);
+          .inFilter('key', ['tech_pre', 'med_pre', 'med_footer', 'license_okpo']);
 
       for (final row in response as List<dynamic>) {
         final map = row as Map<String, dynamic>;
@@ -62,6 +67,12 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
             break;
           case 'med_pre':
             _medController.text = (map['value'] as String?) ?? '';
+            break;
+          case 'med_footer':
+            _medFooterController.text = (map['value'] as String?) ?? '';
+            break;
+          case 'license_okpo':
+            _okpoController.text = (map['value'] as String?) ?? '';
             break;
         }
       }
@@ -84,6 +95,14 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
         {
           'key': 'med_pre',
           'value': _medController.text.trim(),
+        },
+        {
+          'key': 'med_footer',
+          'value': _medFooterController.text.trim(),
+        },
+        {
+          'key': 'license_okpo',
+          'value': _okpoController.text.trim(),
         },
       ];
       await client.from('stamps').upsert(rows, onConflict: 'key');
@@ -137,6 +156,35 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
                     maxLines: 3,
                     decoration: const InputDecoration(
                       border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Подпись под печатью медосмотра',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _medFooterController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      helperText: 'Например: ООО "КПЛПЗ "ЕМС", лицензия ...',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'ОКПО (используется во всех путевых листах)',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _okpoController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 10,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      helperText: 'До 10 цифр. Доступно только администратору.',
                     ),
                   ),
                   const SizedBox(height: 24),

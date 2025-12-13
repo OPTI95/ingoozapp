@@ -18,6 +18,11 @@ class _ProfilePageState extends State<ProfilePage> {
   final _innController = TextEditingController();
   final _postalCodeController = TextEditingController();
   final _addressController = TextEditingController();
+  final _snilsController = TextEditingController();
+  final _driverLicenseNumberController = TextEditingController();
+
+  DateTime? _driverLicenseValidFrom;
+  DateTime? _driverLicenseValidTo;
 
   OwnerType _ownerType = OwnerType.individual;
 
@@ -41,7 +46,7 @@ class _ProfilePageState extends State<ProfilePage> {
       final response = await client
           .from('profiles')
           .select(
-              'full_name, phone, owner_inn, owner_postal_code, owner_address, owner_type')
+              'full_name, phone, owner_inn, owner_postal_code, owner_address, owner_type, owner_snils, driver_license_number, driver_license_valid_from, driver_license_valid_to')
           .eq('user_id', userId)
           .maybeSingle();
 
@@ -52,6 +57,11 @@ class _ProfilePageState extends State<ProfilePage> {
         _postalCodeController.text =
             (response['owner_postal_code'] as String?) ?? '';
         _addressController.text = (response['owner_address'] as String?) ?? '';
+        _snilsController.text = (response['owner_snils'] as String?) ?? '';
+        _driverLicenseNumberController.text =
+            (response['driver_license_number'] as String?) ?? '';
+        _driverLicenseValidFrom = _parseDateValue(response['driver_license_valid_from']);
+        _driverLicenseValidTo = _parseDateValue(response['driver_license_valid_to']);
         _ownerType = OwnerTypeX.fromValue(response['owner_type'] as String?);
       }
     } catch (_) {
@@ -63,6 +73,40 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  DateTime? _parseDateValue(dynamic value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    if (value is String && value.isNotEmpty) {
+      return DateTime.tryParse(value);
+    }
+    return null;
+  }
+
+  String _formatDisplayDate(DateTime? date) {
+    if (date == null) return 'Не выбрано';
+    return '${date.day.toString().padLeft(2, '0')}.'
+        '${date.month.toString().padLeft(2, '0')}.'
+        '${date.year}';
+  }
+
+  Future<void> _pickLicenseDate({required bool isFrom}) async {
+    final initial = (isFrom ? _driverLicenseValidFrom : _driverLicenseValidTo) ?? DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1990),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null) return;
+    setState(() {
+      if (isFrom) {
+        _driverLicenseValidFrom = picked;
+      } else {
+        _driverLicenseValidTo = picked;
+      }
+    });
+  }
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -70,6 +114,8 @@ class _ProfilePageState extends State<ProfilePage> {
     _innController.dispose();
     _postalCodeController.dispose();
     _addressController.dispose();
+    _snilsController.dispose();
+    _driverLicenseNumberController.dispose();
     super.dispose();
   }
 
@@ -99,6 +145,11 @@ class _ProfilePageState extends State<ProfilePage> {
         'owner_inn': _innController.text.trim(),
         'owner_postal_code': _postalCodeController.text.trim(),
         'owner_address': _addressController.text.trim(),
+        'owner_snils': _snilsController.text.trim(),
+        'driver_license_number': _driverLicenseNumberController.text.trim(),
+        'driver_license_valid_from':
+            _driverLicenseValidFrom?.toIso8601String(),
+        'driver_license_valid_to': _driverLicenseValidTo?.toIso8601String(),
         'owner_type': _ownerType.value,
       };
 
@@ -163,6 +214,35 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
+                      controller: _driverLicenseNumberController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: const InputDecoration(
+                        labelText: 'Водительское удостоверение (серия + номер)',
+                        helperText: 'Например 7735803290',
+                        helperMaxLines: 2,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _pickLicenseDate(isFrom: true),
+                            child: Text('Действительно с: ${_formatDisplayDate(_driverLicenseValidFrom)}'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => _pickLicenseDate(isFrom: false),
+                            child: Text('Действительно по: ${_formatDisplayDate(_driverLicenseValidTo)}'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
                       controller: _nameController,
                       decoration:
                           const InputDecoration(labelText: 'ФИО / наименование'),
@@ -200,6 +280,7 @@ class _ProfilePageState extends State<ProfilePage> {
                     TextFormField(
                       controller: _postalCodeController,
                       keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
                         labelText: 'Индекс',
                         helperText:
@@ -216,7 +297,30 @@ class _ProfilePageState extends State<ProfilePage> {
                     TextFormField(
                       controller: _phoneController,
                       keyboardType: TextInputType.phone,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(labelText: 'Телефон'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _snilsController,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'СНИЛС',
+                        helperText: 'Формат XXX-XXX-XXX-XX. Можно найти в СНИЛС.',
+                        helperMaxLines: 2,
+                      ),
+                      validator: (value) {
+                        final v = value?.trim() ?? '';
+                        if (v.isEmpty) return null;
+                        final snilsRegex = RegExp(r'^\d{3}-\d{3}-\d{3}-\d{2} ?$');
+                        if (!snilsRegex.hasMatch(v)) {
+                          return 'Введите СНИЛС в формате XXX-XXX-XXX-XX';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 24),
                     SizedBox(
