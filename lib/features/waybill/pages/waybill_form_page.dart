@@ -7,6 +7,8 @@ import '../../../data/models/waybill_model.dart';
 import '../../../data/repositories/payment_repository.dart';
 import '../../../data/repositories/waybill_repository.dart';
 import '../../payments/pages/payment_method_page.dart';
+import 'waybill_admin_panel_page.dart';
+import 'waybill_pdf_preview_page.dart';
 import 'waybill_view_page.dart';
 
 class WaybillFormPage extends StatefulWidget {
@@ -48,8 +50,10 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
   bool _saving = false;
   bool _profileIncomplete = false;
   double _balance = 0;
+  bool _isAdmin = false;
 
   static const double _waybillPrice = 20;
+  static const int _waybillStartNumber = 101;
 
   List<CarModel> _cars = [];
   CarModel? _selectedCar;
@@ -59,6 +63,12 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
     super.initState();
     _recalculateChecks();
     _initData();
+  }
+
+  void _openAdminPanel() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const WaybillAdminPanelPage()),
+    );
   }
 
   Future<void> _initData() async {
@@ -71,7 +81,7 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
         final profile = await client
             .from('profiles')
             .select(
-                'full_name, phone, owner_inn, owner_postal_code, owner_address, owner_type, owner_snils, driver_license_number, driver_license_valid_from, driver_license_valid_to, balance')
+                'full_name, phone, owner_inn, owner_postal_code, owner_address, owner_type, owner_snils, driver_license_number, driver_license_valid_from, driver_license_valid_to, balance, is_admin')
             .eq('user_id', userId)
             .maybeSingle();
 
@@ -99,6 +109,7 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
           } else if (rawBalance is String) {
             _balance = double.tryParse(rawBalance) ?? 0;
           }
+          _isAdmin = (profile['is_admin'] as bool?) ?? false;
 
           _profileIncomplete =
               (name == null || name.isEmpty || phone == null || phone.isEmpty);
@@ -116,7 +127,7 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
           .toList();
 
       // Generate next waybill number for this user
-      String nextNumber = '00001';
+      int nextNumberInt = _waybillStartNumber;
       if (userId != null) {
         final last = await client
             .from('waybills')
@@ -128,14 +139,16 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
         if (last != null && last['number'] is String) {
           final lastStr = last['number'] as String;
           final lastInt = int.tryParse(lastStr) ?? 0;
-          nextNumber = (lastInt + 1).toString().padLeft(5, '0');
+          if (lastInt >= _waybillStartNumber) {
+            nextNumberInt = lastInt + 1;
+          }
         }
       }
 
       setState(() {
         _cars = cars;
         _selectedCar = cars.isNotEmpty ? cars.first : null;
-        _numberController.text = nextNumber;
+        _numberController.text = nextNumberInt.toString().padLeft(5, '0');
         _loading = false;
       });
     } catch (_) {

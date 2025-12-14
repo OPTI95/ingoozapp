@@ -3,11 +3,12 @@ import 'package:flutter/material.dart';
 import '../../features/auth/pages/sign_in_page.dart';
 import '../../features/auth/pages/sign_up_page.dart';
 import '../../features/auth/pages/whatsapp_code_page.dart';
-import '../../features/admin/pages/stamps_settings_page.dart';
 import '../../features/auth/pages/reset_password_page.dart';
 import '../../features/cars/pages/cars_list_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/profile/pages/profile_page.dart';
+import '../../features/admin/pages/stamps_settings_page.dart';
+import '../../features/waybill/pages/waybill_admin_panel_page.dart';
 import '../../features/waybill/pages/waybill_page.dart';
 import '../../features/payments/pages/payment_method_page.dart';
 
@@ -37,6 +38,8 @@ class AppRouter {
         return _material(const ResetPasswordPage());
       case '/admin-stamps':
         return _material(const StampsSettingsPage());
+      case '/admin-waybills':
+        return _material(const WaybillAdminPanelPage());
       default:
         return MaterialPageRoute<void>(
           builder: (_) => const Scaffold(

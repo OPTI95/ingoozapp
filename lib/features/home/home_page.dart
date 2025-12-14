@@ -251,6 +251,16 @@ class _HomePageState extends State<HomePage> {
                       },
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: ListTile(
+                      title: const Text('Админ: путевые листы'),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        Navigator.of(context).pushNamed('/admin-waybills');
+                      },
+                    ),
+                  ),
                 ],
                 const SizedBox(height: 8),
                 Card(
