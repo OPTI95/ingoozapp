@@ -1,16 +1,54 @@
-# ingoozapp
+# Ingooz — Электронные путевые листы
 
-A new Flutter project.
+Мобильное приложение для оформления электронных путевых листов легкового автомобиля. Flutter + Supabase.
 
-## Getting Started
+## Возможности
 
-This project is a starting point for a Flutter application.
+- **Вход и регистрация** — email/пароль, восстановление пароля, подтверждение почты
+- **Пополнение баланса** — оплата картой через Тинькофф
+- **Профиль** — ФИО, ИНН, водительское удостоверение, адрес
+- **Автомобили** — добавление ТС, данные владельца
+- **Путевые листы** — создание, списание с баланса или подарочных листов
+- **PDF** — генерация и сохранение путевого листа в файлы
+- **Промокоды** — использование подарочных листов
 
-A few resources to get you started if this is your first Flutter project:
+## Скриншоты
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+| Вход | Главная | Пополнение баланса |
+|------|---------|--------------------|
+| ![Вход](docs/screenshots/1-login.png) | ![Главная](docs/screenshots/2-home.png) | ![Пополнение](docs/screenshots/3-payment.png) |
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+| Новый путевой лист | PDF путевого листа |
+|--------------------|--------------------|
+| ![Форма путевого листа](docs/screenshots/4-waybill-form.png) | ![PDF](docs/screenshots/5-waybill-pdf.png) |
+
+## Начало работы
+
+### Требования
+
+- Flutter 3.x
+- Dart 3.x
+
+### Установка
+
+```bash
+git clone <repo>
+cd ingoozapp
+flutter pub get
+cp .env.example .env   # заполните SUPABASE_URL и SUPABASE_ANON_KEY
+flutter run
+```
+
+### Сборка
+
+```bash
+# APK
+flutter build apk --release
+
+# iOS
+flutter build ios --release
+```
+
+## Лицензия
+
+Проприетарный проект.
