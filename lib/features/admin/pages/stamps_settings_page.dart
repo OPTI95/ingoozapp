@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class StampsSettingsPage extends StatefulWidget {
@@ -13,6 +14,7 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
   final _medController = TextEditingController();
   final _medFooterController = TextEditingController();
   final _okpoController = TextEditingController();
+  final _waybillPriceController = TextEditingController();
 
   bool _loading = true;
   bool _saving = false;
@@ -30,6 +32,7 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
     _medController.dispose();
     _medFooterController.dispose();
     _okpoController.dispose();
+    _waybillPriceController.dispose();
     super.dispose();
   }
 
@@ -57,7 +60,13 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
       final response = await client
           .from('stamps')
           .select('key, value')
-          .inFilter('key', ['tech_pre', 'med_pre', 'med_footer', 'license_okpo']);
+          .inFilter('key', [
+            'tech_pre',
+            'med_pre',
+            'med_footer',
+            'license_okpo',
+            'waybill_price',
+          ]);
 
       for (final row in response as List<dynamic>) {
         final map = row as Map<String, dynamic>;
@@ -74,6 +83,9 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
           case 'license_okpo':
             _okpoController.text = (map['value'] as String?) ?? '';
             break;
+          case 'waybill_price':
+            _waybillPriceController.text = (map['value'] as String?) ?? '';
+            break;
         }
       }
     } catch (_) {
@@ -88,33 +100,22 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
     final client = Supabase.instance.client;
     try {
       final rows = [
-        {
-          'key': 'tech_pre',
-          'value': _techController.text.trim(),
-        },
-        {
-          'key': 'med_pre',
-          'value': _medController.text.trim(),
-        },
-        {
-          'key': 'med_footer',
-          'value': _medFooterController.text.trim(),
-        },
-        {
-          'key': 'license_okpo',
-          'value': _okpoController.text.trim(),
-        },
+        {'key': 'tech_pre', 'value': _techController.text.trim()},
+        {'key': 'med_pre', 'value': _medController.text.trim()},
+        {'key': 'med_footer', 'value': _medFooterController.text.trim()},
+        {'key': 'license_okpo', 'value': _okpoController.text.trim()},
+        {'key': 'waybill_price', 'value': _waybillPriceController.text.trim()},
       ];
       await client.from('stamps').upsert(rows, onConflict: 'key');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Печати сохранены')), 
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Печати сохранены')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка сохранения печатей: $e')), 
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка сохранения печатей: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -123,79 +124,101 @@ class _StampsSettingsPageState extends State<StampsSettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Настройки печатей')), 
+      appBar: AppBar(title: const Text('Настройки печатей')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _noAccess
-              ? const Center(child: Text('Нет доступа'))
-              : Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Текст печати предрейсового техконтроля (зона 2/3)',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _techController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Текст печати предрейсового медосмотра (зона 4)',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _medController,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Подпись под печатью медосмотра',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _medFooterController,
-                    maxLines: 2,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      helperText: 'Например: ООО "КПЛПЗ "ЕМС", лицензия ...',
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'ОКПО (используется во всех путевых листах)',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _okpoController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 10,
-                    decoration: const InputDecoration(
-                      border: OutlineInputBorder(),
-                      helperText: 'До 10 цифр. Доступно только администратору.',
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _saving ? null : _save,
-                    child: _saving
-                        ? const CircularProgressIndicator()
-                        : const Text('Сохранить'),
-                  ),
-                ],
+          ? const Center(child: Text('Нет доступа'))
+          : ListView(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                16,
+                16,
+                16 + MediaQuery.of(context).viewInsets.bottom,
               ),
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              children: [
+                const Text(
+                  'Текст печати предрейсового техконтроля (зона 2/3)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _techController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Текст печати предрейсового медосмотра (зона 4)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _medController,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Подпись под печатью медосмотра',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _medFooterController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    helperText: 'Например: ООО "КПЛПЗ "ЕМС", лицензия ...',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'ОКПО (используется во всех путевых листах)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _okpoController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 10,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    helperText: 'До 10 цифр. Доступно только администратору.',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Стоимость путевого листа, ₽',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _waybillPriceController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                  ],
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    helperText: 'Например: 20 или 20.0',
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const CircularProgressIndicator()
+                      : const Text('Сохранить'),
+                ),
+              ],
             ),
     );
   }

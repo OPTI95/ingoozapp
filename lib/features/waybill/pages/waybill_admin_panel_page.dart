@@ -13,14 +13,66 @@ class WaybillAdminPanelPage extends StatefulWidget {
 
 class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
   final _numberController = TextEditingController();
+  final _nameController = TextEditingController();
   bool _loading = true;
   bool _lookupLoading = false;
   bool _isAdmin = false;
+  List<WaybillModel> _nameResults = const [];
 
   @override
   void initState() {
     super.initState();
     _checkAdmin();
+  }
+
+  Future<void> _openLatestByName() async {
+    final query = _nameController.text.trim();
+    if (query.length < 2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите минимум 2 буквы фамилии/имени')), 
+      );
+      return;
+    }
+
+    setState(() => _lookupLoading = true);
+
+    try {
+      final client = Supabase.instance.client;
+      final rows = await client
+          .from('waybills')
+          .select()
+          .ilike('zone2->>owner_name', '%$query%')
+          .order('created_at', ascending: false)
+          .limit(20);
+
+      if (rows == null || rows is! List || rows.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Путевые листы для "$query" не найдены')), 
+        );
+        setState(() {
+          _nameResults = const [];
+        });
+        return;
+      }
+
+      final items = rows
+          .map((e) => WaybillModel.fromMap(e as Map<String, dynamic>))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _nameResults = items;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка при поиске: $e')), 
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _lookupLoading = false);
+      }
+    }
   }
 
   Future<void> _checkAdmin() async {
@@ -105,6 +157,7 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
   @override
   void dispose() {
     _numberController.dispose();
+    _nameController.dispose();
     super.dispose();
   }
 
@@ -159,6 +212,69 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
                     : const Text('Открыть'),
               ),
             ),
+            const SizedBox(height: 32),
+            const Text(
+              'Или найдите по фамилии/имени владельца (берётся из Зоны 1).',
+              style: TextStyle(fontSize: 15),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _nameController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Фамилия или имя',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _lookupLoading ? null : _openLatestByName,
+                child: _lookupLoading
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Найти по фамилии'),
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (_nameResults.isNotEmpty)
+              Expanded(
+                child: ListView.separated(
+                  itemCount: _nameResults.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final item = _nameResults[index];
+                    final start = item.startDate;
+                    final dateLabel = start != null
+                        ? '${start.day.toString().padLeft(2, '0')}.${start.month.toString().padLeft(2, '0')}.${start.year}'
+                        : '—';
+                    return Card(
+                      child: ListTile(
+                        title: Text('№ ${item.number} • $dateLabel'),
+                        subtitle: Text(
+                          item.zone2 != null
+                              ? (item.zone2!['owner_name'] as String? ?? 'Без имени')
+                              : 'Без данных о владельце',
+                        ),
+                        trailing: const Icon(Icons.picture_as_pdf),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => WaybillPdfPreviewPage(waybill: item),
+                            ),
+                          );
+                        },
+                      ),
+                    );
+                  },
+                ),
+              )
+            else
+              const SizedBox.shrink(),
           ],
         ),
       ),

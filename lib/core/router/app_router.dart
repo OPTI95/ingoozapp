@@ -4,6 +4,10 @@ import '../../features/auth/pages/sign_in_page.dart';
 import '../../features/auth/pages/sign_up_page.dart';
 import '../../features/auth/pages/whatsapp_code_page.dart';
 import '../../features/auth/pages/reset_password_page.dart';
+import '../../features/auth/pages/forgot_password_page.dart';
+import '../../features/auth/pages/email_confirmed_page.dart';
+import '../../features/auth/pages/email_change_confirm_page.dart';
+import '../../features/auth/pages/email_link_expired_page.dart';
 import '../../features/cars/pages/cars_list_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/profile/pages/profile_page.dart';
@@ -11,13 +15,90 @@ import '../../features/admin/pages/stamps_settings_page.dart';
 import '../../features/waybill/pages/waybill_admin_panel_page.dart';
 import '../../features/waybill/pages/waybill_page.dart';
 import '../../features/payments/pages/payment_method_page.dart';
+import '../../features/info/pages/guide_page.dart';
+import '../../features/info/pages/contacts_page.dart';
+import '../../features/promo/pages/promo_page.dart';
+import '../../features/promo/pages/promo_admin_page.dart';
 
 /// Centralized router configuration. Replace placeholders as routes appear.
 class AppRouter {
   static final navigatorKey = GlobalKey<NavigatorState>();
 
+  static String? _expiredReasonFromQuery(Map<String, String> queryParams) {
+    final type = queryParams['type'];
+    if (type == 'recovery') return 'recovery';
+    if (type == 'signup') return 'signup';
+    if (type == 'magiclink') return 'email_change';
+    return queryParams['reason'];
+  }
+
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
-    switch (settings.name) {
+    // Парсим URL и параметры
+    final raw = settings.name ?? '';
+    final uri = Uri.tryParse(raw);
+    final queryParams = <String, String>{...?uri?.queryParameters};
+    // Supabase часто кладёт токены/параметры в fragment (#...).
+    final fragment = uri?.fragment ?? '';
+    if (fragment.isNotEmpty) {
+      final fragmentUri = Uri.tryParse('?$fragment');
+      if (fragmentUri != null) {
+        queryParams.addAll(fragmentUri.queryParameters);
+      }
+    }
+
+    // Просроченная/невалидная ссылка auth: показываем специальный экран.
+    final hasExpiredAuthError =
+        queryParams['error'] == 'access_denied' ||
+        queryParams['error_code'] == 'otp_expired' ||
+        raw.contains('otp_expired') ||
+        raw.contains('Email link is invalid or has expired');
+    if (hasExpiredAuthError) {
+      return _material(
+        EmailLinkExpiredPage(
+          reason: _expiredReasonFromQuery(queryParams),
+        ),
+      );
+    }
+
+    // Для custom scheme вида ingoozapp://email-change-confirm path обычно пустой,
+    // а нужный маршрут лежит в host.
+    final path = (uri != null && uri.path.isNotEmpty)
+        ? uri.path
+        : (uri != null && uri.host.isNotEmpty ? '/${uri.host}' : raw);
+    
+    // Email confirmation (signup)
+    if (queryParams['type'] == 'signup') {
+      return _material(const EmailConfirmedPage());
+    }
+
+    // Password recovery deep link.
+    if (queryParams['type'] == 'recovery') {
+      return _material(const ResetPasswordPage());
+    }
+
+    // Magic-link из старой почты для подтверждения смены email.
+    // В некоторых сценариях Supabase не передаёт наш custom path, только type=magiclink.
+    // Тогда открываем confirm-экран без параметров: он завершит confirm_latest.
+    if (queryParams['type'] == 'magiclink') {
+      return _material(
+        const EmailChangeConfirmPage(
+          requestId: '',
+          confirmToken: '',
+        ),
+      );
+    }
+    
+    // Проверяем, есть ли access_token в пути (альтернативный вариант)
+    if (settings.name?.contains('access_token') == true && 
+        settings.name?.contains('type=signup') == true) {
+      return _material(const EmailConfirmedPage());
+    }
+    if (settings.name?.contains('access_token') == true &&
+        settings.name?.contains('type=recovery') == true) {
+      return _material(const ResetPasswordPage());
+    }
+    
+    switch (path) {
       case '/':
         return _material(const SignInPage());
       case '/sign-up':
@@ -36,6 +117,32 @@ class AppRouter {
         return _material(const PaymentMethodPage());
       case '/reset-password':
         return _material(const ResetPasswordPage());
+      case '/forgot-password':
+        return _material(const ForgotPasswordPage());
+      case '/email-confirmed':
+      case '/email-confirm': // Deep link может прийти без '-ed'
+        return _material(const EmailConfirmedPage());
+      case '/email-link-expired':
+        return _material(
+          EmailLinkExpiredPage(
+            reason: _expiredReasonFromQuery(queryParams),
+          ),
+        );
+      case '/email-change-confirm':
+        return _material(
+          EmailChangeConfirmPage(
+            requestId: queryParams['request_id'] ?? '',
+            confirmToken: queryParams['confirm_token'] ?? '',
+          ),
+        );
+      case '/guide':
+        return _material(const GuidePage());
+      case '/contacts':
+        return _material(const ContactsPage());
+      case '/promo':
+        return _material(const PromoPage());
+      case '/admin-promo':
+        return _material(const PromoAdminPage());
       case '/admin-stamps':
         return _material(const StampsSettingsPage());
       case '/admin-waybills':

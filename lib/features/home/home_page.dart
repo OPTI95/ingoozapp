@@ -1,5 +1,10 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../waybill/pages/waybill_form_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -11,6 +16,9 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   double? _balance;
   bool _loading = true;
+  int _promoCredits = 0;
+
+  RealtimeChannel? _profilesChannel;
 
   String? _profileName;
   String? _profilePhone;
@@ -20,13 +28,52 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _loadBalance();
+    _subscribeToBalanceChanges();
+  }
+
+  void _subscribeToBalanceChanges() {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return;
+
+    // Подписка на изменения баланса текущего пользователя.
+    _profilesChannel = client.channel('public:profiles')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.update,
+        schema: 'public',
+        table: 'profiles',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: user.id,
+        ),
+        callback: (payload) {
+          // Как только профайл обновился (в том числе из вебхука Тинькофф) — перезагружаем баланс.
+          _loadBalance();
+        },
+      )
+      ..subscribe();
   }
 
   Future<void> _signOut() async {
     final client = Supabase.instance.client;
     await client.auth.signOut();
+    await _profilesChannel?.unsubscribe();
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+  }
+
+  @override
+  void dispose() {
+    _profilesChannel?.unsubscribe();
+    super.dispose();
+  }
+
+  Future<void> _openPaymentMethods() async {
+    final result = await Navigator.of(context).pushNamed('/payment-methods');
+    if (result == true) {
+      _loadBalance();
+    }
   }
 
   Future<void> _openWaybillOrProfile() async {
@@ -40,21 +87,39 @@ class _HomePageState extends State<HomePage> {
     try {
       final profile = await client
           .from('profiles')
-          .select('full_name, phone')
+          .select(
+            'full_name, owner_snils, driver_license_number, driver_license_valid_from, driver_license_valid_to',
+          )
           .eq('user_id', user.id)
           .maybeSingle();
 
       final name = profile != null ? profile['full_name'] as String? : null;
-      final phone = profile != null ? profile['phone'] as String? : null;
+      final snils = profile != null ? profile['owner_snils'] as String? : null;
+      final licenseNumber = profile != null
+          ? profile['driver_license_number'] as String?
+          : null;
+      final licenseFrom = profile != null
+          ? profile['driver_license_valid_from']
+          : null;
+      final licenseTo = profile != null
+          ? profile['driver_license_valid_to']
+          : null;
       final incomplete =
-          name == null || name.isEmpty || phone == null || phone.isEmpty;
+          name == null ||
+          name.isEmpty ||
+          snils == null ||
+          snils.isEmpty ||
+          licenseNumber == null ||
+          licenseNumber.isEmpty ||
+          licenseFrom == null ||
+          licenseTo == null;
 
       if (incomplete) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Перед оформлением путевого листа заполните профиль (ФИО и телефон)',
+              'Перед оформлением путевого листа заполните профиль водителя: ФИО, СНИЛС, номер ВУ и даты "С/ПО".',
             ),
           ),
         );
@@ -82,14 +147,42 @@ class _HomePageState extends State<HomePage> {
         return;
       }
 
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Проверка времени'),
+          content: const Text(
+            'Время путевого листа берётся из времени вашего устройства. '
+            'Проверьте, что дата и время на телефоне установлены правильно.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Продолжить'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true || !mounted) return;
+
       if (!mounted) return;
-      Navigator.of(context).pushNamed('/waybill');
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const WaybillFormPage()));
+      if (!mounted) return;
+      _loadBalance();
     } catch (_) {
       if (!mounted) return;
       // В случае ошибки запроса просто отправим в профиль, чтобы пользователь мог проверить данные
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Не удалось проверить профиль, откройте и проверьте данные'),
+          content: Text(
+            'Не удалось проверить профиль, откройте и проверьте данные',
+          ),
         ),
       );
       Navigator.of(context).pushNamed('/profile');
@@ -110,13 +203,14 @@ class _HomePageState extends State<HomePage> {
 
       final response = await client
           .from('profiles')
-          .select('balance, full_name, phone, is_admin')
+          .select('balance, full_name, phone, is_admin, promo_waybills_left')
           .eq('user_id', user.id)
           .maybeSingle();
 
       double parsedBalance = 0;
       String? nameValue;
       String? phoneValue;
+      int promoValue = 0;
 
       if (response != null) {
         final rawBalance = response['balance'];
@@ -129,6 +223,12 @@ class _HomePageState extends State<HomePage> {
         phoneValue = response['phone'] as String?;
         final adminValue = response['is_admin'];
         _isAdmin = adminValue is bool && adminValue;
+        final promoRaw = response['promo_waybills_left'];
+        if (promoRaw is int) {
+          promoValue = promoRaw;
+        } else if (promoRaw is num) {
+          promoValue = promoRaw.toInt();
+        }
       }
 
       setState(() {
@@ -136,6 +236,7 @@ class _HomePageState extends State<HomePage> {
         _loading = false;
         _profileName = nameValue;
         _profilePhone = phoneValue;
+        _promoCredits = promoValue;
       });
     } catch (_) {
       setState(() {
@@ -154,11 +255,10 @@ class _HomePageState extends State<HomePage> {
       ),
       builder: (context) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.85,
+            child: ListView(
+              padding: const EdgeInsets.all(16),
               children: [
                 Align(
                   alignment: Alignment.centerLeft,
@@ -170,14 +270,7 @@ class _HomePageState extends State<HomePage> {
                 const SizedBox(height: 8),
                 Card(
                   child: ListTile(
-                    title: Text(_profileName?.isNotEmpty == true
-                        ? _profileName!
-                        : 'Профиль'),
-                    subtitle: Text(
-                      _profilePhone?.isNotEmpty == true
-                          ? _profilePhone!
-                          : 'Заполните профиль',
-                    ),
+                    title: const Text('Профиль'),
                     onTap: () {
                       Navigator.of(context).pop();
                       Navigator.of(context).pushNamed('/profile');
@@ -196,11 +289,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     onTap: () async {
                       Navigator.of(context).pop();
-                      final result = await Navigator.of(context)
-                          .pushNamed('/payment-methods');
-                      if (result == true) {
-                        _loadBalance();
-                      }
+                      await _openPaymentMethods();
                     },
                   ),
                 ),
@@ -218,12 +307,12 @@ class _HomePageState extends State<HomePage> {
                 Card(
                   child: ListTile(
                     title: const Text('Промокод'),
-                    onTap: () {
+                    subtitle: Text('Подарочных: $_promoCredits шт.'),
+                    onTap: () async {
                       Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Раздел промокодов пока в разработке')),
-                      );
+                      await Navigator.of(context).pushNamed('/promo');
+                      if (!mounted) return;
+                      _loadBalance();
                     },
                   ),
                 ),
@@ -233,10 +322,17 @@ class _HomePageState extends State<HomePage> {
                     title: const Text('Памятка'),
                     onTap: () {
                       Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                            content: Text('Раздел памятки пока в разработке')),
-                      );
+                      Navigator.of(context).pushNamed('/guide');
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Card(
+                  child: ListTile(
+                    title: const Text('Контакты'),
+                    onTap: () {
+                      Navigator.of(context).pop();
+                      Navigator.of(context).pushNamed('/contacts');
                     },
                   ),
                 ),
@@ -258,6 +354,16 @@ class _HomePageState extends State<HomePage> {
                       onTap: () {
                         Navigator.of(context).pop();
                         Navigator.of(context).pushNamed('/admin-waybills');
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Card(
+                    child: ListTile(
+                      title: const Text('Админ: промокоды'),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        Navigator.of(context).pushNamed('/admin-promo');
                       },
                     ),
                   ),
@@ -283,94 +389,136 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final balanceText =
-        _loading ? '... ₽' : '${_balance?.toStringAsFixed(0) ?? '0'} ₽';
+    final balanceText = _loading
+        ? '... ₽'
+        : '${_balance?.toStringAsFixed(0) ?? '0'} ₽';
+
+    final isIOS = Platform.isIOS;
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFE4A6),
       body: SafeArea(
-        child: Stack(
-          children: [
-            // Center big button
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return RefreshIndicator(
+              onRefresh: _loadBalance,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
                 child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _openWaybillOrProfile,
-                    child: const Text('Электронный путевой лист'),
-                  ),
-                ),
-              ),
-            ),
-            // Top controls
-            Positioned(
-              top: 16,
-              left: 16,
-              child: Material(
-                color: Colors.white,
-                shape: const CircleBorder(),
-                elevation: 2,
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: _openMenu,
-                  child: const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: Icon(Icons.menu),
-                  ),
-                ),
-              ),
-            ),
-            Positioned(
-              top: 16,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Colors.black12,
-                        blurRadius: 4,
-                        offset: Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
+                  height: constraints.maxHeight,
+                  child: Stack(
                     children: [
-                      Text(
-                        balanceText,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+                      // Center big button
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed: _openWaybillOrProfile,
+                              child: const Text('Электронный путевой лист'),
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      InkWell(
-                        onTap: () async {
-                          final result = await Navigator.of(context)
-                              .pushNamed('/payment-methods');
-                          if (result == true) {
-                            _loadBalance();
-                          }
-                        },
-                        child: const Icon(
-                          Icons.add,
-                          color: Colors.green,
+                      // Top controls
+                      Positioned(
+                        top: 16,
+                        left: 16,
+                        child: isIOS
+                            ? Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(24),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black12,
+                                      blurRadius: 6,
+                                      offset: Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: CupertinoButton(
+                                  padding: const EdgeInsets.all(10),
+                                  onPressed: _openMenu,
+                                  child: const Icon(
+                                    CupertinoIcons.line_horizontal_3,
+                                  ),
+                                ),
+                              )
+                            : Material(
+                                color: Colors.white,
+                                shape: const CircleBorder(),
+                                elevation: 2,
+                                child: InkWell(
+                                  customBorder: const CircleBorder(),
+                                  onTap: _openMenu,
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(12),
+                                    child: Icon(Icons.menu),
+                                  ),
+                                ),
+                              ),
+                      ),
+                      Positioned(
+                        top: 16,
+                        left: 0,
+                        right: 0,
+                        child: Center(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black12,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  balanceText,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                isIOS
+                                    ? CupertinoButton(
+                                        padding: EdgeInsets.zero,
+                                        onPressed: _openPaymentMethods,
+                                        child: const Icon(
+                                          CupertinoIcons.add_circled_solid,
+                                          color: CupertinoColors.activeGreen,
+                                        ),
+                                      )
+                                    : InkWell(
+                                        onTap: _openPaymentMethods,
+                                        child: const Icon(
+                                          Icons.add,
+                                          color: Colors.green,
+                                        ),
+                                      ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

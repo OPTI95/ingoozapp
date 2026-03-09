@@ -39,7 +39,11 @@ class SupabaseAuthRepository implements AuthRepository {
 
   @override
   Future<UserProfile> signUpWithEmail({required String email, required String password}) async {
-    final response = await _client.auth.signUp(email: email, password: password);
+    final response = await _client.auth.signUp(
+      email: email,
+      password: password,
+      emailRedirectTo: 'ingoozapp://email-confirm',
+    );
     final user = response.user;
     if (user == null) {
       throw AuthException('User not returned');
@@ -57,7 +61,7 @@ class SupabaseAuthRepository implements AuthRepository {
   Future<void> sendPasswordResetEmail({required String email}) {
     return _client.auth.resetPasswordForEmail(
       email,
-      redirectTo: 'ingooz://reset-password',
+      redirectTo: 'ingoozapp://reset-password',
     );
   }
 

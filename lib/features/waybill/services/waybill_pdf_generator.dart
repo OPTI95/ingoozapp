@@ -2,7 +2,6 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:pdf/widgets.dart';
 
 import '../../../data/models/car_model.dart';
 import '../../../data/models/waybill_model.dart';
@@ -12,8 +11,10 @@ Future<Map<String, pw.Font>> _loadPdfFonts() async {
   final regular = await rootBundle.load('assets/fonts/Arial.ttf');
   final bold = await rootBundle.load('assets/fonts/Arial Bold.ttf');
   final italic = await rootBundle.load('assets/fonts/Arial Italic.ttf');
-  final boldItalic = await rootBundle.load('assets/fonts/Arial Bold Italic.ttf');
-  
+  final boldItalic = await rootBundle.load(
+    'assets/fonts/Arial Bold Italic.ttf',
+  );
+
   return {
     'regular': pw.Font.ttf(regular),
     'bold': pw.Font.ttf(bold),
@@ -77,14 +78,9 @@ pw.Widget _stampTextColumn(
         pw.Text(
           lines[i],
           textAlign: pw.TextAlign.center,
-          style: _textStyle(
-            fontSize: fontSize,
-            fonts: fonts,
-            color: color,
-          ),
+          style: _textStyle(fontSize: fontSize, fonts: fonts, color: color),
         ),
-        if (i != lines.length - 1)
-          pw.SizedBox(height: fontSize * 0.25),
+        if (i != lines.length - 1) pw.SizedBox(height: fontSize * 0.25),
       ],
     ],
   );
@@ -99,10 +95,10 @@ Future<Uint8List> buildWaybillPdf({
   CarModel? car,
 }) async {
   final pdf = pw.Document();
-  
+
   // Загружаем шрифты
   final fonts = await _loadPdfFonts();
-  
+
   final z2 = ownerZone ?? <String, dynamic>{};
   final z4 = zone4 ?? <String, dynamic>{};
 
@@ -110,13 +106,19 @@ Future<Uint8List> buildWaybillPdf({
       '${d.day.toString().padLeft(2, '0')}.${d.month.toString().padLeft(2, '0')}.${d.year}';
 
   String _ownerTypeLabel(String? raw) {
+    if (raw != null && raw.startsWith('other:')) {
+      final label = raw.substring('other:'.length).trim();
+      return label.isEmpty ? 'Иное' : label;
+    }
     switch (raw) {
       case 'sole':
         return 'Индивидуальный предприниматель';
       case 'legal':
-        return 'Юридическое лицо';
+        return 'ООО';
       case 'individual':
         return 'Физическое лицо';
+      case 'other':
+        return 'Иное';
       default:
         return '';
     }
@@ -125,7 +127,6 @@ Future<Uint8List> buildWaybillPdf({
   final ownerTypeText = _ownerTypeLabel(z2['owner_type'] as String?);
   final ownerName = (z2['owner_name'] ?? '') as String;
   final ownerAddress = (z2['owner_address'] ?? '') as String;
-  final ownerInn = (z2['owner_inn'] ?? '') as String;
   final ownerSnils = (z2['owner_snils'] ?? '') as String;
   final driverLicenseNumber = (z2['driver_license_number'] ?? '') as String;
 
@@ -140,16 +141,17 @@ Future<Uint8List> buildWaybillPdf({
     return '';
   }
 
-  final driverLicenseValidFrom = _formatIsoDate(z2['driver_license_valid_from']);
+  final driverLicenseValidFrom = _formatIsoDate(
+    z2['driver_license_valid_from'],
+  );
   final driverLicenseValidTo = _formatIsoDate(z2['driver_license_valid_to']);
 
-  final ownerLineParts = <String>[
+  final ownerMainParts = <String>[
     if (ownerTypeText.isNotEmpty) ownerTypeText,
     if (ownerName.isNotEmpty) ownerName,
     if (ownerAddress.isNotEmpty) ownerAddress,
-    if (ownerInn.isNotEmpty) 'ИНН $ownerInn',
   ];
-  final ownerLine = ownerLineParts.join(', ');
+  final ownerMainLine = ownerMainParts.join(', ');
 
   String licenseDisplayName = '';
   String licenseOgrn = '';
@@ -167,19 +169,35 @@ Future<Uint8List> buildWaybillPdf({
   final medStampFooter = (z4['med_stamp_footer'] ?? '') as String;
 
   if (car != null) {
-    final base = car.licenseOrgName ?? '';
-    switch (car.ownerType) {
-      case OwnerType.soleProprietor:
-        licenseDisplayName = 'Индивидуальный предприниматель $base';
+    final base = (car.licenseOrgName ?? '').trim();
+    final licenseType = (car.licenseType ?? '').trim();
+    final customType = (car.licenseTypeOtherLabel ?? '').trim();
+    String prefix = '';
+    switch (licenseType) {
+      case 'individual':
+        prefix = 'Физическое лицо';
         break;
-      case OwnerType.legalEntity:
-        licenseDisplayName = base.isNotEmpty
-            ? 'Общество с Ограниченной Ответственностью\n"$base"'
-            : 'Общество с Ограниченной Ответственностью';
+      case 'sole':
+        prefix = 'Индивидуальный предприниматель';
         break;
-      case OwnerType.individual:
-        licenseDisplayName = base;
+      case 'ooo':
+        prefix = 'ООО';
         break;
+      case 'ao':
+        prefix = 'АО';
+        break;
+      case 'other':
+        prefix = customType.isNotEmpty ? customType : 'Иное';
+        break;
+      default:
+        prefix = '';
+    }
+    if (prefix.isEmpty) {
+      licenseDisplayName = base;
+    } else if (base.isEmpty) {
+      licenseDisplayName = prefix;
+    } else {
+      licenseDisplayName = '$prefix $base';
     }
 
     licenseOgrn = car.licenseOgrn ?? '';
@@ -187,7 +205,9 @@ Future<Uint8List> buildWaybillPdf({
     licenseAddress = car.licenseAddress ?? '';
     licensePhone = car.licensePhone ?? '';
     licenseNumber = car.licenseNumber ?? '';
-    licenseIssuedAt = car.licenseIssuedAt != null ? fmtDate(car.licenseIssuedAt!) : '';
+    licenseIssuedAt = car.licenseIssuedAt != null
+        ? fmtDate(car.licenseIssuedAt!)
+        : '';
     carDisplayName = car.displayName;
     plateNumber = car.plateNumber;
 
@@ -195,6 +215,50 @@ Future<Uint8List> buildWaybillPdf({
       licenseOkud = car.licenseOkud!;
     }
   }
+  if (licenseOkud.trim().isEmpty) {
+    licenseOkud = '0345001';
+  }
+  String _formatLicenseDisplay(String value) {
+    final text = value.trim();
+    if (text.isEmpty || text.contains('\n') || text.length <= 42) {
+      return text;
+    }
+    final mid = text.length ~/ 2;
+    final leftSpace = text.lastIndexOf(' ', mid);
+    final rightSpace = text.indexOf(' ', mid);
+    int splitAt = -1;
+    if (leftSpace != -1 && rightSpace != -1) {
+      splitAt = (mid - leftSpace) <= (rightSpace - mid)
+          ? leftSpace
+          : rightSpace;
+    } else if (leftSpace != -1) {
+      splitAt = leftSpace;
+    } else if (rightSpace != -1) {
+      splitAt = rightSpace;
+    }
+    if (splitAt <= 0 || splitAt >= text.length - 1) {
+      return text;
+    }
+    return '${text.substring(0, splitAt)}\n${text.substring(splitAt + 1)}';
+  }
+
+  final licenseDisplayFormatted = _formatLicenseDisplay(licenseDisplayName);
+  final isLicenseDisplayMultiline = licenseDisplayFormatted.contains('\n');
+  String _composeOwnerHeaderLine() {
+    final full = ownerMainLine.trim();
+    const approxTwoLinesLimit = 170; // для блока шириной ~422 при размере 8
+    if (full.length <= approxTwoLinesLimit) return full;
+
+    final trimmed = full.length > approxTwoLinesLimit
+        ? '${full.substring(0, approxTwoLinesLimit).trimRight()}…'
+        : full;
+    return trimmed;
+  }
+
+  final ownerHeaderLine = _composeOwnerHeaderLine();
+  final ownerHeaderEstimatedLines = ((ownerHeaderLine.length / 88).ceil())
+      .clamp(1, 2);
+  final licenseAddressDisplay = licenseAddress.trim();
 
   String fmtTime(String time) {
     // ожидаем формат HH:MM или HH:MM:SS, отрезаем до минут
@@ -207,18 +271,58 @@ Future<Uint8List> buildWaybillPdf({
   String fmtClock(DateTime dt) =>
       '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 
+  DateTime computeEffectiveEndDate() {
+    final startDateOnly = DateTime(
+      waybill.startDate.year,
+      waybill.startDate.month,
+      waybill.startDate.day,
+    );
+    final endDateOnly = DateTime(
+      waybill.endDate.year,
+      waybill.endDate.month,
+      waybill.endDate.day,
+    );
+    if (endDateOnly.isAfter(startDateOnly)) {
+      return endDateOnly;
+    }
+    int? hour;
+    final z4Hour = z4['departure_hour'];
+    if (z4Hour is int) {
+      hour = z4Hour;
+    } else if (z4Hour is num) {
+      hour = z4Hour.toInt();
+    } else if (z4Hour is String) {
+      hour = int.tryParse(z4Hour);
+    }
+    if (hour == null) {
+      final parts = waybill.startTime.split(':');
+      hour = parts.isNotEmpty ? int.tryParse(parts[0]) : null;
+    }
+    if (hour != null && hour >= 12) {
+      return startDateOnly.add(const Duration(days: 1));
+    }
+    return endDateOnly;
+  }
+
   DateTime? startDateTime;
   final startParts = waybill.startTime.split(':');
   if (startParts.length >= 2) {
     final h = int.tryParse(startParts[0]);
     final m = int.tryParse(startParts[1]);
     if (h != null && m != null) {
-      startDateTime = DateTime(waybill.startDate.year, waybill.startDate.month,
-          waybill.startDate.day, h, m);
+      startDateTime = DateTime(
+        waybill.startDate.year,
+        waybill.startDate.month,
+        waybill.startDate.day,
+        h,
+        m,
+      );
     }
   }
 
-  final inspectionDateTime = startDateTime?.subtract(const Duration(minutes: 5));
+  final inspectionDateTime = startDateTime?.subtract(
+    const Duration(minutes: 5),
+  );
 
   final mainTimeDisplay = fmtTime(waybill.startTime);
   String departureHour = '';
@@ -229,20 +333,16 @@ Future<Uint8List> buildWaybillPdf({
     if (parts.length > 1) departureMinute = parts[1];
   }
 
-  String inspectionHour = '';
-  String inspectionMinute = '';
+  final endDateDisplay = fmtDate(computeEffectiveEndDate());
   String inspectionTimeDisplay = '';
-  String inspectionDateDisplay = fmtDate(waybill.endDate);
+  String inspectionDateDisplay = fmtDate(waybill.startDate);
   if (inspectionDateTime != null) {
     inspectionTimeDisplay = fmtClock(inspectionDateTime);
     inspectionDateDisplay = fmtDate(inspectionDateTime);
-    inspectionHour = inspectionDateTime.hour.toString().padLeft(2, '0');
-    inspectionMinute = inspectionDateTime.minute.toString().padLeft(2, '0');
   }
 
-  final mileageValue = waybill.mileage != null ? (waybill.mileage! - 44) : null;
+  final mileageValue = waybill.mileage != null ? (waybill.mileage! - 28) : null;
   final mileageText = mileageValue != null ? '$mileageValue' : '';
-
 
   // Загружаем изображение бланка как фон страницы
   final bgData = await rootBundle.load('assets/waybill_blank.png');
@@ -256,9 +356,7 @@ Future<Uint8List> buildWaybillPdf({
         return pw.Stack(
           children: [
             // Фон — официальный бланк
-            pw.Positioned.fill(
-              child: pw.Image(bgImage, fit: pw.BoxFit.cover),
-            ),
+            pw.Positioned.fill(child: pw.Image(bgImage, fit: pw.BoxFit.cover)),
 
             // Примерная разметка основных полей поверх бланка.
             // При необходимости позиции можно будет тонко подогнать.
@@ -317,13 +415,13 @@ Future<Uint8List> buildWaybillPdf({
               ),
 
             // Организация (лицензиат) с префиксом по типу
-            if (licenseDisplayName.isNotEmpty)
+            if (licenseDisplayFormatted.isNotEmpty)
               pw.Positioned(
-                top: 115,
-                left: 130,
+                top: isLicenseDisplayMultiline ? 116 : 122,
+                left: 134,
                 child: pw.Text(
-                  licenseDisplayName,
-                  style: _textStyle(fontSize: 8, fonts: fonts),
+                  licenseDisplayFormatted,
+                  style: _textStyle(fontSize: 8, fonts: fonts, height: 1.0),
                 ),
               ),
 
@@ -367,9 +465,13 @@ Future<Uint8List> buildWaybillPdf({
             pw.Positioned(
               top: 147,
               left: 110,
-              child: pw.Text(
-                licenseAddress,
-                style: _textStyle(fontSize: 8, fonts: fonts),
+              child: pw.SizedBox(
+                width: 360,
+                child: pw.Text(
+                  licenseAddressDisplay,
+                  maxLines: 1,
+                  style: _textStyle(fontSize: 8, fonts: fonts),
+                ),
               ),
             ),
             pw.Positioned(
@@ -405,11 +507,7 @@ Future<Uint8List> buildWaybillPdf({
                 left: 94,
                 child: pw.SizedBox(
                   width: 230,
-                  child: _stampTextColumn(
-                    techStampText,
-                    fonts,
-                    fontSize: 5.65,
-                  ),
+                  child: _stampTextColumn(techStampText, fonts, fontSize: 5.65),
                 ),
               ),
 
@@ -419,11 +517,7 @@ Future<Uint8List> buildWaybillPdf({
                 left: 373,
                 child: pw.SizedBox(
                   width: 230,
-                  child: _stampTextColumn(
-                    techStampText,
-                    fonts,
-                    fontSize: 5.65,
-                  ),
+                  child: _stampTextColumn(techStampText, fonts, fontSize: 5.65),
                 ),
               ),
 
@@ -464,7 +558,7 @@ Future<Uint8List> buildWaybillPdf({
               top: 87,
               left: 370,
               child: pw.Text(
-                inspectionDateDisplay,
+                endDateDisplay,
                 style: _textStyle(fontSize: 8, fonts: fonts),
               ),
             ),
@@ -488,14 +582,18 @@ Future<Uint8List> buildWaybillPdf({
                 ),
               ),
 
-            // Собственник (тип + ФИО + адрес + ИНН)
-            if (ownerLine.isNotEmpty)
+            // Собственник (тип + ФИО + адрес) в одном блоке.
+            if (ownerHeaderLine.isNotEmpty)
               pw.Positioned(
-                top: 29,
-                left: 145,
-                child: pw.Text(
-                  ownerLine,
-                  style: _textStyle(fontSize: 8, fonts: fonts),
+                top: ownerHeaderEstimatedLines >= 2 ? 24 : 28,
+                left: 141,
+                child: pw.SizedBox(
+                  width: 422,
+                  child: pw.Text(
+                    ownerHeaderLine,
+                    maxLines: 2,
+                    style: _textStyle(fontSize: 8, fonts: fonts, height: 1.0),
+                  ),
                 ),
               ),
 
@@ -545,7 +643,12 @@ Future<Uint8List> buildWaybillPdf({
               left: 210,
               child: pw.Text(
                 fmtDate(waybill.startDate),
-                style: _textStyle(fontSize: 8, isBold: true, isItalic: true, fonts: fonts),
+                style: _textStyle(
+                  fontSize: 8,
+                  isBold: true,
+                  isItalic: true,
+                  fonts: fonts,
+                ),
               ),
             ),
             pw.Positioned(
@@ -593,47 +696,40 @@ Future<Uint8List> buildWaybillPdf({
               ),
 
             // Время медосмотра (примерно в соответствующей ячейке зоны 4)
-
             pw.Positioned(
-            top: 670,  // Adjust these coordinates as needed
-            left: 205,  // Adjust these coordinates as needed
-            child: pw.Text(
-                () {
+              top: 670, // Adjust these coordinates as needed
+              left: 205, // Adjust these coordinates as needed
+              child: pw.Text(() {
                 final raw = z2['med_check_datetime'];
                 if (raw is String && raw.isNotEmpty) {
-                    try {
+                  try {
                     final dt = DateTime.parse(raw);
                     return '${dt.day.toString().padLeft(2, '0')}.${dt.month.toString().padLeft(2, '0')}.${dt.year}';
-                    } catch (_) {
+                  } catch (_) {
                     return '';
-                    }
+                  }
                 }
                 return '';
-                }(),
-                style: _textStyle(fontSize: 8, fonts: fonts),
-            ),
+              }(), style: _textStyle(fontSize: 8, fonts: fonts)),
             ),
 
             pw.Positioned(
               top: 683,
               left: 215,
-              child: pw.Text(
-                () {
-                  final raw = z2['med_check_datetime'];
-                  if (raw is String && raw.isNotEmpty) {
-                    try {
-                      final dt = DateTime.parse(raw);
-                      final h = dt.hour.toString().padLeft(2, '0');
-                      final m = dt.minute.toString().padLeft(2, '0');
-                      return '$h:$m';
-                    } catch (_) {
-                      return raw;
-                    }
+              child: pw.Text(() {
+                final raw = z2['med_check_datetime'];
+                if (raw is String && raw.isNotEmpty) {
+                  try {
+                    final dt = DateTime.parse(raw);
+                    final h = dt.hour.toString().padLeft(2, '0');
+                    final m = dt.minute.toString().padLeft(2, '0');
+                    return '$h:$m';
+                  } catch (_) {
+                    return raw;
                   }
-                  return '';
-                }(),
-                style: _textStyle(fontSize: 8, fonts: fonts),
-              ),
+                }
+                return '';
+              }(), style: _textStyle(fontSize: 8, fonts: fonts)),
             ),
 
             // Водитель Ф.И.О. (используем driverName, если есть, иначе owner_name)
