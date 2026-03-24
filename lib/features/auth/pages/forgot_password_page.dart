@@ -67,12 +67,13 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Восстановление пароля')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: _emailSent
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: _emailSent
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.email, size: 64, color: Colors.green),
                     const SizedBox(height: 16),
@@ -183,7 +184,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                     ),
                   ],
                 ),
-              ),
+                ),
+        ),
       ),
     );
   }

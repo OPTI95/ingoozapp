@@ -115,13 +115,14 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               if (_errorMessage != null) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -218,7 +219,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                     ? const CircularProgressIndicator()
                     : const Text('Сохранить новый пароль'),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

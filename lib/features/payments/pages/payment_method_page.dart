@@ -564,10 +564,11 @@ class _PaymentMethodPageState extends State<PaymentMethodPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Пополнение баланса')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text('Сумма пополнения'),
             const SizedBox(height: 8),
@@ -597,7 +598,8 @@ class _PaymentMethodPageState extends State<PaymentMethodPage> {
                 onTap: _tinkoffLoading ? null : _startTinkoffPayment,
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

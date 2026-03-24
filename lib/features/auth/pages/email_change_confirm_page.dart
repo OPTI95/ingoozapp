@@ -71,11 +71,10 @@ class _EmailChangeConfirmPageState extends State<EmailChangeConfirmPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Смена email')),
-      body: Center(
-        child: Padding(
+      body: SafeArea(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             children: [
               if (_loading)
                 const CircularProgressIndicator()

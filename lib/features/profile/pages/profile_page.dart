@@ -312,10 +312,10 @@ class _ProfilePageState extends State<ProfilePage> {
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _driverLicenseNumberController,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      textCapitalization: TextCapitalization.characters,
                       decoration: const InputDecoration(
                         labelText: 'Водительское удостоверение (серия + номер)',
+                        helperText: 'Например 7735803290',
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {

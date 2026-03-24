@@ -124,13 +124,14 @@ class _SignInPageState extends State<SignInPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Вход в аккаунт')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               TextFormField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
@@ -221,7 +222,8 @@ class _SignInPageState extends State<SignInPage> {
                 onPressed: () => Navigator.of(context).pushNamed('/sign-up'),
                 child: const Text('Нет аккаунта? Зарегистрируйтесь'),
               ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

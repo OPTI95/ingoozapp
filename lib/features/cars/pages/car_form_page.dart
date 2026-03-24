@@ -187,16 +187,18 @@ class _CarFormPageState extends State<CarFormPage> {
     if (_licenseType == null) {
       return 'Сначала выберите тип лицензиата';
     }
-    final digits = (value ?? '').trim();
-    if (digits.isEmpty) return 'Укажите ОГРН / ОГРНИП';
+    final v = (value ?? '').trim();
+    if (v.isEmpty) return 'Укажите ОГРН / ОГРНИП или «–»';
+    if (v == '-' || v == '–' || v == '—') return null;
+    final digitsOnly = v.replaceAll(RegExp(r'\D'), '');
     if (_licenseType == 'sole') {
-      if (digits.length != 15) {
-        return 'Для ИП ОГРНИП должен содержать 15 цифр';
+      if (digitsOnly.length != 15) {
+        return 'Для ИП ОГРНИП — 15 цифр, или «–» для самозанятых';
       }
       return null;
     }
-    if (digits.length != 13) {
-      return 'Для не-ИП ОГРН должен содержать 13 цифр';
+    if (digitsOnly.length != 13) {
+      return 'Для не-ИП ОГРН — 13 цифр, или «–» для самозанятых';
     }
     return null;
   }
@@ -523,9 +525,7 @@ class _CarFormPageState extends State<CarFormPage> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _licenseOgrnController,
-                keyboardType: TextInputType.number,
                 maxLength: 15,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 decoration: const InputDecoration(
                   labelText: 'ОГРН / ОГРНИП',
                   helperText: '13 цифр (не ИП) или 15 цифр (ИП).',
@@ -534,6 +534,21 @@ class _CarFormPageState extends State<CarFormPage> {
                   errorMaxLines: 2,
                 ),
                 validator: _validateLicenseOgrn,
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.amber.shade700),
+                ),
+                child: const Text(
+                  'Если вы самозанятый и являетесь перевозчиком, '
+                  'в поле ОГРН можете поставить «–».',
+                  style: TextStyle(fontSize: 12),
+                ),
               ),
               const SizedBox(height: 16),
               TextFormField(
