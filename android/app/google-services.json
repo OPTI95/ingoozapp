@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "340115707878",
+    "project_id": "ingooz-239d2",
+    "storage_bucket": "ingooz-239d2.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:340115707878:android:16b67985043fcc36fc2827",
+        "android_client_info": {
+          "package_name": "com.example.ingoozapp"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "340115707878-jflrtkjhnblptm013fer4tndp9i3uqq5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.ingoozapp",
+            "certificate_hash": "aa237558cb912765e410ac9622b97e98962078da"
+          }
+        },
+        {
+          "client_id": "340115707878-4q72f4m50kq4dn2rai44gipk2m23toap.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDqfYn4inPrH2gk5YlKllZgr7h7azAB884"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "340115707878-4q72f4m50kq4dn2rai44gipk2m23toap.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "340115707878-jadijii9i2iut00recd5rg2221p0iscq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.ingooz"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
