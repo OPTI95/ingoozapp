@@ -339,6 +339,14 @@ class _SignUpPageState extends State<SignUpPage> {
                     ? const Text('Создать аккаунт')
                     : Text('Подождите ($_resendCooldown)'),
               ),
+              const SizedBox(height: 8),
+              const Divider(),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.of(context).pushNamed('/phone-sign-up'),
+                icon: const Icon(Icons.phone_callback),
+                label: const Text('Регистрация по номеру телефона'),
+              ),
               ],
             ),
           ),

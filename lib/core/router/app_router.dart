@@ -8,6 +8,8 @@ import '../../features/auth/pages/forgot_password_page.dart';
 import '../../features/auth/pages/email_confirmed_page.dart';
 import '../../features/auth/pages/email_change_confirm_page.dart';
 import '../../features/auth/pages/email_link_expired_page.dart';
+import '../../features/auth/pages/phone_sign_in_page.dart';
+import '../../features/auth/pages/set_password_page.dart';
 import '../../features/cars/pages/cars_list_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/profile/pages/profile_page.dart';
@@ -105,6 +107,22 @@ class AppRouter {
         return _material(const SignUpPage());
       case '/whatsapp-code':
         return _material(const WhatsAppCodePage());
+      case '/phone-sign-in':
+        return _material(const PhoneSignInPage(isRegisterMode: false));
+      case '/phone-sign-up':
+        return _material(const PhoneSignInPage(isRegisterMode: true));
+      case '/phone-reset-password':
+        return _material(const PhoneSignInPage(isResetMode: true));
+      case '/set-password':
+        return _material(const SetPasswordPage());
+      case '/set-password-reset':
+        return _material(
+          const SetPasswordPage(
+            title: 'Новый пароль',
+            description: 'Введите новый пароль для входа по номеру телефона.',
+            successRoute: '/',
+          ),
+        );
       case '/home':
         return _material(const HomePage());
       case '/cars':

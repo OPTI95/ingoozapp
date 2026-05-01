@@ -410,3 +410,9 @@ enabled = true
 verify_jwt = true
 import_map = "./functions/email-change/deno.json"
 entrypoint = "./functions/email-change/index.ts"
+
+[functions.sms-auth]
+enabled = true
+verify_jwt = false
+import_map = "./functions/sms-auth/deno.json"
+entrypoint = "./functions/sms-auth/index.ts"

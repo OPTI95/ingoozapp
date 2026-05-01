@@ -196,9 +196,19 @@ class _PromoAdminPageState extends State<PromoAdminPage> {
     setState(() => _loading = true);
     try {
       final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) {
+        if (!mounted) return;
+        setState(() {
+          _isAdmin = false;
+          _loading = false;
+        });
+        return;
+      }
       final profile = await client
           .from('profiles')
           .select('is_admin')
+          .eq('user_id', userId)
           .maybeSingle();
       final isAdmin = (profile?['is_admin'] as bool?) ?? false;
       if (!isAdmin) {

@@ -1,6 +1,7 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -193,6 +194,12 @@ class _HomePageState extends State<HomePage> {
     try {
       final client = Supabase.instance.client;
       final user = client.auth.currentUser;
+      if (kDebugMode) {
+        debugPrint('USER_ID: ${user?.id}');
+        debugPrint(
+          'USER_ACCESS_TOKEN: ${client.auth.currentSession?.accessToken}',
+        );
+      }
       if (user == null) {
         setState(() {
           _balance = 0;
@@ -396,7 +403,7 @@ class _HomePageState extends State<HomePage> {
     final isIOS = Platform.isIOS;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFE4A6),
+      backgroundColor: const Color(0xFFFAD429),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -413,10 +420,29 @@ class _HomePageState extends State<HomePage> {
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 24),
                           child: SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton(
+                            width: 280,
+                            height: 58,
+                            child: FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF00C853),
+                                foregroundColor: Colors.white,
+                                elevation: 4,
+                                shadowColor: Colors.black26,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                textStyle: const TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.6,
+                                ),
+                              ),
                               onPressed: _openWaybillOrProfile,
-                              child: const Text('Электронный путевой лист'),
+                              child: const Text('ВЫПУСТИТЬ ЭПЛ'),
                             ),
                           ),
                         ),

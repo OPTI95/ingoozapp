@@ -1,6 +1,14 @@
+import 'dart:convert';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../data/models/user_profile.dart';
+
+class PhoneVerifyResult {
+  final UserProfile user;
+  final bool isNew;
+  const PhoneVerifyResult({required this.user, required this.isNew});
+}
 
 /// Defines contract for authentication flows.
 abstract class AuthRepository {
@@ -9,7 +17,15 @@ abstract class AuthRepository {
   Future<UserProfile> signUpWithEmail({required String email, required String password});
   Future<UserProfile> signInWithGoogle();
   Future<UserProfile> signInWithWhatsApp({required String phone, required String otp});
+  Future<UserProfile> signInWithPhonePassword({required String phone, required String password});
   Future<void> sendPasswordResetEmail({required String email});
+  Future<void> sendPhoneOtp({required String phone, String mode = 'login'});
+  Future<PhoneVerifyResult> verifyPhoneOtp({
+    required String phone,
+    required String code,
+    String mode = 'login',
+  });
+  Future<void> setPassword({required String password});
   Future<void> signOut();
 }
 
@@ -53,7 +69,6 @@ class SupabaseAuthRepository implements AuthRepository {
 
   @override
   Future<UserProfile> signInWithGoogle() {
-    // Google sign-in is currently disabled.
     throw UnimplementedError();
   }
 
@@ -67,8 +82,105 @@ class SupabaseAuthRepository implements AuthRepository {
 
   @override
   Future<UserProfile> signInWithWhatsApp({required String phone, required String otp}) {
-    // TODO: call custom Supabase Edge Function to verify WhatsApp OTP.
     throw UnimplementedError();
+  }
+
+  @override
+  Future<UserProfile> signInWithPhonePassword({
+    required String phone,
+    required String password,
+  }) async {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    String normalized;
+    if (digits.length == 11 && (digits.startsWith('7') || digits.startsWith('8'))) {
+      normalized = '7${digits.substring(1)}';
+    } else if (digits.length == 10) {
+      normalized = '7$digits';
+    } else {
+      throw AuthException('Неверный формат номера телефона.');
+    }
+
+    final placeholderEmail = 'phone_$normalized@ingooz.local';
+
+    final response = await _client.auth.signInWithPassword(
+      email: placeholderEmail,
+      password: password,
+    );
+    final user = response.user;
+    if (user == null) {
+      throw AuthException('Не удалось войти.');
+    }
+    return UserProfile(
+      id: user.id,
+      email: '',
+      phone: user.phone ?? '+$normalized',
+    );
+  }
+
+  @override
+  Future<void> sendPhoneOtp({required String phone, String mode = 'login'}) async {
+    final response = await _client.functions.invoke(
+      'sms-auth',
+      body: {'action': 'send_otp', 'phone': phone, 'mode': mode},
+    );
+
+    final data = response.data is String
+        ? jsonDecode(response.data as String) as Map<String, dynamic>
+        : response.data as Map<String, dynamic>;
+
+    if (data['error'] != null) {
+      throw AuthException(data['error'] as String);
+    }
+  }
+
+  @override
+  Future<PhoneVerifyResult> verifyPhoneOtp({
+    required String phone,
+    required String code,
+    String mode = 'login',
+  }) async {
+    final response = await _client.functions.invoke(
+      'sms-auth',
+      body: {'action': 'verify_otp', 'phone': phone, 'code': code, 'mode': mode},
+    );
+
+    final data = response.data is String
+        ? jsonDecode(response.data as String) as Map<String, dynamic>
+        : response.data as Map<String, dynamic>;
+
+    if (data['error'] != null) {
+      throw AuthException(data['error'] as String);
+    }
+
+    final accessToken = data['access_token'] as String?;
+    final refreshToken = data['refresh_token'] as String?;
+
+    if (accessToken == null || refreshToken == null) {
+      throw AuthException('Не удалось получить сессию.');
+    }
+
+    await _client.auth.setSession(refreshToken);
+
+    final isNew = data['is_new'] == true;
+    final user = data['user'] as Map<String, dynamic>?;
+    return PhoneVerifyResult(
+      user: UserProfile(
+        id: user?['id'] as String? ?? '',
+        email: '',
+        phone: user?['phone'] as String? ?? phone,
+      ),
+      isNew: isNew,
+    );
+  }
+
+  @override
+  Future<void> setPassword({required String password}) async {
+    await _client.auth.updateUser(
+      UserAttributes(
+        password: password,
+        data: const {'phone_password_set': true},
+      ),
+    );
   }
 
   @override

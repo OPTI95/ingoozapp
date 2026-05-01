@@ -182,6 +182,14 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                           ? const CircularProgressIndicator()
                           : const Text('Отправить письмо'),
                     ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _loading
+                          ? null
+                          : () => Navigator.of(context).pushNamed('/phone-reset-password'),
+                      icon: const Icon(Icons.phone_callback),
+                      label: const Text('Сброс по номеру телефона'),
+                    ),
                   ],
                 ),
                 ),

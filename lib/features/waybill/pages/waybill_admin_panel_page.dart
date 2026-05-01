@@ -16,8 +16,11 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
   final _nameController = TextEditingController();
   bool _loading = true;
   bool _lookupLoading = false;
+  bool _statsLoading = true;
   bool _isAdmin = false;
   List<WaybillModel> _nameResults = const [];
+  int _registeredUsersCount = 0;
+  int _waybillsLastWeekCount = 0;
 
   @override
   void initState() {
@@ -38,14 +41,39 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
 
     try {
       final client = Supabase.instance.client;
-      final rows = await client
+      final rowsByZone2 = await client
           .from('waybills')
           .select()
           .ilike('zone2->>owner_name', '%$query%')
           .order('created_at', ascending: false)
           .limit(20);
 
-      if (rows == null || rows is! List || rows.isEmpty) {
+      final rowsByProfile = await client
+          .from('waybills')
+          .select('*, profiles!inner(full_name)')
+          .ilike('profiles.full_name', '%$query%')
+          .order('created_at', ascending: false)
+          .limit(20);
+
+      final mergedRows = <Map<String, dynamic>>[];
+      final seenIds = <String>{};
+
+      void addRows(dynamic rows) {
+        if (rows is! List) return;
+        for (final row in rows) {
+          if (row is! Map<String, dynamic>) continue;
+          final id = row['id']?.toString();
+          if (id == null || id.isEmpty) continue;
+          if (seenIds.add(id)) {
+            mergedRows.add(row);
+          }
+        }
+      }
+
+      addRows(rowsByZone2);
+      addRows(rowsByProfile);
+
+      if (mergedRows.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Путевые листы для "$query" не найдены')), 
@@ -56,8 +84,8 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
         return;
       }
 
-      final items = rows
-          .map((e) => WaybillModel.fromMap(e as Map<String, dynamic>))
+      final items = mergedRows
+          .map(WaybillModel.fromMap)
           .toList();
       if (!mounted) return;
       setState(() {
@@ -97,12 +125,46 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
         _isAdmin = isAdmin;
         _loading = false;
       });
+      if (isAdmin) {
+        _loadStats();
+      } else {
+        setState(() => _statsLoading = false);
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _isAdmin = false;
+        _statsLoading = false;
       });
+    }
+  }
+
+  Future<void> _loadStats() async {
+    final client = Supabase.instance.client;
+    try {
+      final stats = await client.rpc('admin_dashboard_stats');
+
+      if (!mounted) return;
+      var usersTotal = 0;
+      var waybillsLast7Days = 0;
+      if (stats is List && stats.isNotEmpty) {
+        final row = stats.first;
+        if (row is Map<String, dynamic>) {
+          final usersRaw = row['users_total'];
+          final waybillsRaw = row['waybills_last_7_days'];
+          usersTotal = usersRaw is num ? usersRaw.toInt() : 0;
+          waybillsLast7Days = waybillsRaw is num ? waybillsRaw.toInt() : 0;
+        }
+      }
+      setState(() {
+        _registeredUsersCount = usersTotal;
+        _waybillsLastWeekCount = waybillsLast7Days;
+        _statsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _statsLoading = false);
     }
   }
 
@@ -191,6 +253,30 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
               style: TextStyle(fontSize: 15),
             ),
             const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _StatCard(
+                    title: 'Пользователи',
+                    value: _statsLoading
+                        ? '...'
+                        : _registeredUsersCount.toString(),
+                    subtitle: 'Всего регистраций',
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _StatCard(
+                    title: 'Путевые листы',
+                    value: _statsLoading
+                        ? '...'
+                        : _waybillsLastWeekCount.toString(),
+                    subtitle: 'За последние 7 дней',
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
             TextField(
               controller: _numberController,
               decoration: const InputDecoration(
@@ -275,6 +361,45 @@ class _WaybillAdminPanelPageState extends State<WaybillAdminPanelPage> {
               )
             else
               const SizedBox.shrink(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+  });
+
+  final String title;
+  final String value;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
       ),
