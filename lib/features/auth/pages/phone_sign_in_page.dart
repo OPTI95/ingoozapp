@@ -2,11 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../../data/repositories/auth_repository.dart';
+import '../../../core/di/injection.dart';
+import '../../../core/widgets/app_back_button.dart';
+import '../../../core/widgets/password_eye.dart';
+import '../presentation/bloc/auth_bloc.dart';
 
-class PhoneSignInPage extends StatefulWidget {
+class PhoneSignInPage extends StatelessWidget {
   const PhoneSignInPage({
     super.key,
     this.isRegisterMode = false,
@@ -17,42 +21,69 @@ class PhoneSignInPage extends StatefulWidget {
   final bool isResetMode;
 
   @override
-  State<PhoneSignInPage> createState() => _PhoneSignInPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider<AuthBloc>(
+      create: (_) => sl<AuthBloc>(),
+      child: _PhoneSignInView(
+        isRegisterMode: isRegisterMode,
+        isResetMode: isResetMode,
+      ),
+    );
+  }
 }
 
-class _PhoneSignInPageState extends State<PhoneSignInPage>
-    with SingleTickerProviderStateMixin {
-  // Flash call tab
+class _PhoneSignInView extends StatefulWidget {
+  const _PhoneSignInView({
+    required this.isRegisterMode,
+    required this.isResetMode,
+  });
+
+  final bool isRegisterMode;
+  final bool isResetMode;
+
+  @override
+  State<_PhoneSignInView> createState() => _PhoneSignInViewState();
+}
+
+class _PhoneSignInViewState extends State<_PhoneSignInView> {
+  // Call-code flow
   final _phoneController = TextEditingController();
   final _codeController = TextEditingController();
   final _phoneFocus = FocusNode();
   final _codeFocus = FocusNode();
 
-  // Password tab
+  // Password flow
   final _pwdPhoneController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
 
-  final AuthRepository _authRepo =
-      SupabaseAuthRepository(Supabase.instance.client);
-
-  bool _loading = false;
   bool _codeSent = false;
   int _cooldown = 0;
   Timer? _cooldownTimer;
   String? _normalizedPhone;
-  late final bool _isRegisterMode;
-  late final bool _isResetMode;
+
+  bool get _isRegisterMode => widget.isRegisterMode;
+  bool get _isResetMode => widget.isResetMode;
+
+  /// 4 digits are required by [_verifyCode] — used to disable the
+  /// "Подтвердить код" button so it can't be spammed empty.
+  bool get _codeValid => _codeController.text.trim().length == 4;
 
   @override
   void initState() {
     super.initState();
-    _isRegisterMode = widget.isRegisterMode;
-    _isResetMode = widget.isResetMode;
+    // Rebuild whenever the code field changes so the "Подтвердить код"
+    // button enables/disables in lockstep with input.
+    _codeController.addListener(_onCodeChanged);
+  }
+
+  void _onCodeChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _codeController.removeListener(_onCodeChanged);
     _phoneController.dispose();
     _codeController.dispose();
     _phoneFocus.dispose();
@@ -78,203 +109,109 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
     });
   }
 
-  // ─── Flash call flow ───
+  void _snack(String message, {bool error = true}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: error ? Colors.red : Colors.green,
+      ),
+    );
+  }
 
-  Future<void> _sendCode() async {
+  // ─── Intent → Bloc events ───
+
+  void _sendCode() {
     final digits = _digitsOnly(_phoneController.text);
     if (digits.length != 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Введите 10 цифр номера (без +7)'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _snack('Введите 10 цифр номера (без +7)');
       return;
     }
-
-    setState(() => _loading = true);
-    try {
-      _normalizedPhone = '7$digits';
-      await _authRepo.sendPhoneOtp(
-        phone: _normalizedPhone!,
-        mode: _isResetMode
-            ? 'reset'
-            : (_isRegisterMode ? 'register' : 'login'),
-      );
-      if (!mounted) return;
-
-      setState(() => _codeSent = true);
-      _startCooldown();
-      _codeFocus.requestFocus();
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Сейчас вам поступит звонок. Введите последние 4 цифры номера.'),
-          backgroundColor: Colors.green,
-          duration: Duration(seconds: 5),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_friendlyError(e)),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    _normalizedPhone = '7$digits';
+    context.read<AuthBloc>().add(AuthCodeRequested(_normalizedPhone!));
   }
 
-  Future<void> _verifyCode() async {
+  void _verifyCode() {
     final code = _codeController.text.trim();
     if (code.length != 4) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Введите 4 последние цифры номера'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _snack('Введите 4 последние цифры номера');
       return;
     }
-
     if (_normalizedPhone == null) return;
-
-    setState(() => _loading = true);
-    try {
-      final result = await _authRepo.verifyPhoneOtp(
-        phone: _normalizedPhone!,
-        code: code,
-        mode: _isResetMode
-            ? 'reset'
-            : (_isRegisterMode ? 'register' : 'login'),
-      );
-      if (!mounted) return;
-      if (_isResetMode) {
-        Navigator.of(context).pushReplacementNamed('/set-password-reset');
-      } else if (result.isNew) {
-        Navigator.of(context).pushReplacementNamed('/set-password');
-      } else {
-        Navigator.of(context).pushReplacementNamed('/home');
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_friendlyError(e)),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    context
+        .read<AuthBloc>()
+        .add(AuthCodeVerified(phone: _normalizedPhone!, code: code));
   }
 
-  // ─── Password flow ───
-
-  Future<void> _signInWithPassword() async {
+  void _signInWithPassword() {
     final digits = _digitsOnly(_pwdPhoneController.text);
     if (digits.length != 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Введите 10 цифр номера (без +7)'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _snack('Введите 10 цифр номера (без +7)');
       return;
     }
     final password = _passwordController.text.trim();
     if (password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Введите пароль'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _snack('Введите пароль');
       return;
     }
-
-    setState(() => _loading = true);
-    try {
-      await _authRepo.signInWithPhonePassword(
-        phone: '7$digits',
-        password: password,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed('/home');
-    } catch (e) {
-      if (!mounted) return;
-      String msg = 'Не удалось войти.';
-      final lower = e.toString().toLowerCase();
-      if (lower.contains('invalid login credentials') ||
-          lower.contains('invalid_credentials')) {
-        msg = 'Неверный номер или пароль.';
-      } else if (lower.contains('network') || lower.contains('socket')) {
-        msg = 'Нет подключения к интернету.';
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(msg), backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
+    context.read<AuthBloc>().add(
+          AuthPasswordLoginRequested(phone: '7$digits', password: password),
+        );
   }
 
-  String _friendlyError(Object error) {
-    final raw = error.toString().toLowerCase();
-    if (raw.contains('уже используется') ||
-        raw.contains('already used') ||
-        raw.contains('already exists')) {
-      return 'Этот номер уже используется. Войдите в аккаунт.';
-    }
-    if (raw.contains('не найден') || raw.contains('not found')) {
-      return 'Аккаунт с таким номером не найден.';
-    }
-    if (raw.contains('подождите') ||
-        raw.contains('rate') ||
-        raw.contains('429')) {
-      final match = RegExp(r'(\d+)\s*сек').firstMatch(error.toString());
-      if (match != null) {
-        return 'Подождите ${match.group(1)} сек. перед повторной отправкой.';
+  // ─── Bloc state → side effects ───
+
+  void _onState(BuildContext context, AuthState state) {
+    if (state is AuthCodeSent) {
+      setState(() => _codeSent = true);
+      _startCooldown();
+      _codeFocus.requestFocus();
+      _snack(
+        'Сейчас вам поступит звонок. Введите последние 4 цифры номера.',
+        error: false,
+      );
+    } else if (state is AuthAuthenticated) {
+      if (_isResetMode) {
+        Navigator.of(context).pushReplacementNamed('/set-password-reset');
+      } else if (state.isNew) {
+        Navigator.of(context).pushReplacementNamed('/set-password');
+      } else {
+        Navigator.of(context).pushReplacementNamed('/home');
       }
-      return 'Слишком частые запросы. Подождите немного.';
+    } else if (state is AuthError) {
+      _snack(state.message);
     }
-    if (raw.contains('неверный код')) {
-      return error
-          .toString()
-          .replaceAll('AuthException(message: ', '')
-          .replaceAll(')', '');
-    }
-    if (raw.contains('превышено')) {
-      return 'Превышено количество попыток. Запросите новый код.';
-    }
-    if (raw.contains('не найден') || raw.contains('истёк')) {
-      return 'Код истёк. Запросите новый.';
-    }
-    if (raw.contains('network') || raw.contains('socket')) {
-      return 'Нет подключения к интернету.';
-    }
-    if (error is AuthException) return error.message;
-    return 'Произошла ошибка. Попробуйте позже.';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        centerTitle: false,
+        titleSpacing: 0,
+        leading: const AppBackButton(),
         title: Text(
           _isResetMode
               ? 'Сброс пароля по номеру'
               : (_isRegisterMode ? 'Регистрация по номеру' : 'Вход по номеру'),
+          style: const TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
-      body: (_isRegisterMode || _isResetMode) ? _buildCallTab() : _buildPasswordTab(),
+      body: BlocConsumer<AuthBloc, AuthState>(
+        listener: _onState,
+        builder: (context, state) {
+          final loading = state is AuthInProgress;
+          return (_isRegisterMode || _isResetMode)
+              ? _buildCallTab(loading)
+              : _buildPasswordTab(loading);
+        },
+      ),
     );
   }
 
-  Widget _buildCallTab() {
+  Widget _buildCallTab(bool loading) {
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -296,9 +233,32 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
                   Expanded(
                     child: Text(
                       _codeSent
-                          ? 'Вам поступит входящий звонок.\nВведите последние 4 цифры номера звонящего.'
-                          : 'Введите номер телефона.\nМы позвоним и сбросим — введите последние 4 цифры входящего номера.',
+                          ? 'Сейчас поступит звонок с незнакомого номера.\nПосмотрите последние 4 цифры этого номера и введите их ниже.\nЕсли звонок не пришёл — нажмите «Позвонить повторно».'
+                          : 'Мы позвоним на ваш номер.\nТрубку брать не нужно — просто посмотрите последние 4 цифры входящего номера.',
                       style: const TextStyle(height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.shade300),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.black87),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Внимание: на номера Tele2 звонок может не поступать.\n'
+                      'Рекомендуем использовать номер другого оператора.',
+                      style: TextStyle(height: 1.3),
                     ),
                   ),
                 ],
@@ -323,8 +283,8 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
             const SizedBox(height: 16),
             if (!_codeSent) ...[
               ElevatedButton(
-                onPressed: _loading ? null : _sendCode,
-                child: _loading
+                onPressed: loading ? null : _sendCode,
+                child: loading
                     ? const SizedBox(
                         height: 20,
                         width: 20,
@@ -355,18 +315,18 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
               ),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: _loading ? null : _verifyCode,
-                child: _loading
+                onPressed: (loading || !_codeValid) ? null : _verifyCode,
+                child: loading
                     ? const SizedBox(
                         height: 20,
                         width: 20,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : Text(_isResetMode ? 'Продолжить' : 'Войти'),
+                    : Text(_isResetMode ? 'Продолжить' : 'Подтвердить код'),
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: (_cooldown > 0 || _loading) ? null : _sendCode,
+                onPressed: (_cooldown > 0 || loading) ? null : _sendCode,
                 child: _cooldown > 0
                     ? Text('Позвонить повторно ($_cooldown)')
                     : const Text('Позвонить повторно'),
@@ -385,7 +345,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
     );
   }
 
-  Widget _buildPasswordTab() {
+  Widget _buildPasswordTab(bool loading) {
     return SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -434,11 +394,7 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
               decoration: InputDecoration(
                 labelText: 'Пароль',
                 suffixIcon: IconButton(
-                  icon: Icon(
-                    _obscurePassword
-                        ? Icons.visibility_off
-                        : Icons.visibility,
-                  ),
+                  icon: PasswordEyeIcon(obscured: _obscurePassword),
                   onPressed: () {
                     setState(() => _obscurePassword = !_obscurePassword);
                   },
@@ -447,8 +403,8 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
             ),
             const SizedBox(height: 16),
             ElevatedButton(
-              onPressed: _loading ? null : _signInWithPassword,
-              child: _loading
+              onPressed: loading ? null : _signInWithPassword,
+              child: loading
                   ? const SizedBox(
                       height: 20,
                       width: 20,
@@ -461,7 +417,11 @@ class _PhoneSignInPageState extends State<PhoneSignInPage>
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: () => Navigator.of(context).pushNamed('/phone-sign-up'),
-              icon: const Icon(Icons.person_add_alt_1),
+              icon: SvgPicture.asset(
+                'assets/svg/ic-user-plus.svg',
+                width: 18,
+                height: 18,
+              ),
               label: const Text('Регистрация по номеру'),
             ),
             const SizedBox(height: 8),

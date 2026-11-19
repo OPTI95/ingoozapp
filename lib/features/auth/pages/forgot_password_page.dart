@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/widgets/app_back_button.dart';
+
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
 
@@ -66,7 +68,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         'Используйте для регистрации gmail.com, mail.ru или другие почтовые сервисы.';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Восстановление пароля')),
+      appBar: AppBar(
+        leading: const AppBackButton(),
+        title: const Text('Восстановление пароля'),
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),

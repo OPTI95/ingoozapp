@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:ingoozapp/core/theme/app_colors.dart';
 import 'package:ingoozapp/core/utils/platform_pickers.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:math';
@@ -810,7 +811,7 @@ class _WaybillFormPageState extends State<WaybillFormPage> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : Text('Создать'),
+                            : Text('Создать',style: TextStyle(color: AppColors.primaryBlue),),
                       ),
                     ),
                   ],

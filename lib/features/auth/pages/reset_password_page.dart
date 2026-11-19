@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/widgets/password_eye.dart';
+
 class ResetPasswordPage extends StatefulWidget {
   const ResetPasswordPage({super.key});
 
@@ -161,11 +163,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                 decoration: InputDecoration(
                   labelText: 'Новый пароль',
                   suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePassword
-                          ? Icons.visibility_off
-                          : Icons.visibility,
-                    ),
+                    icon: PasswordEyeIcon(obscured: _obscurePassword),
                     onPressed: () {
                       setState(() {
                         _obscurePassword = !_obscurePassword;
@@ -190,11 +188,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                 decoration: InputDecoration(
                   labelText: 'Подтверждение пароля',
                   suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureConfirm
-                          ? Icons.visibility_off
-                          : Icons.visibility,
-                    ),
+                    icon: PasswordEyeIcon(obscured: _obscureConfirm),
                     onPressed: () {
                       setState(() {
                         _obscureConfirm = !_obscureConfirm;

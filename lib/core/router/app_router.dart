@@ -4,18 +4,20 @@ import '../../features/auth/pages/sign_in_page.dart';
 import '../../features/auth/pages/sign_up_page.dart';
 import '../../features/auth/pages/whatsapp_code_page.dart';
 import '../../features/auth/pages/reset_password_page.dart';
-import '../../features/auth/pages/forgot_password_page.dart';
 import '../../features/auth/pages/email_confirmed_page.dart';
 import '../../features/auth/pages/email_change_confirm_page.dart';
 import '../../features/auth/pages/email_link_expired_page.dart';
 import '../../features/auth/pages/phone_sign_in_page.dart';
 import '../../features/auth/pages/set_password_page.dart';
+import '../../features/auth/pages/password_reset_email_page.dart';
+import '../../features/auth/pages/password_reset_code_page.dart';
+import '../../features/auth/pages/password_reset_new_password_page.dart';
 import '../../features/cars/pages/cars_list_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/profile/pages/profile_page.dart';
 import '../../features/admin/pages/stamps_settings_page.dart';
 import '../../features/waybill/pages/waybill_admin_panel_page.dart';
-import '../../features/waybill/pages/waybill_page.dart';
+import '../../features/waybills/presentation/pages/waybills_page.dart';
 import '../../features/payments/pages/payment_method_page.dart';
 import '../../features/info/pages/guide_page.dart';
 import '../../features/info/pages/contacts_page.dart';
@@ -130,13 +132,33 @@ class AppRouter {
       case '/profile':
         return _material(const ProfilePage());
       case '/waybill':
-        return _material(const WaybillPage());
+        return _material(const WaybillsPage());
       case '/payment-methods':
         return _material(const PaymentMethodPage());
       case '/reset-password':
         return _material(const ResetPasswordPage());
+      // Старый экран восстановления по magic-link оставлен для совместимости,
+      // но '/forgot-password' ведёт на новый флоу с одноразовым кодом.
       case '/forgot-password':
-        return _material(const ForgotPasswordPage());
+      case '/password-reset':
+        return _material(const PasswordResetEmailPage());
+      case '/password-reset-code':
+        final codeArgs =
+            (settings.arguments as Map<String, dynamic>?) ?? const {};
+        return _material(
+          PasswordResetCodePage(
+            email: codeArgs['email'] as String? ?? '',
+            resetId: codeArgs['reset_id'] as int? ?? 0,
+          ),
+        );
+      case '/password-reset-new':
+        final args =
+            (settings.arguments as Map<String, dynamic>?) ?? const {};
+        return _material(
+          PasswordResetNewPasswordPage(
+            resetToken: args['reset_token'] as String? ?? '',
+          ),
+        );
       case '/email-confirmed':
       case '/email-confirm': // Deep link может прийти без '-ed'
         return _material(const EmailConfirmedPage());

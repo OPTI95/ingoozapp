@@ -29,11 +29,21 @@ const OTP_LENGTH = 4
 const OTP_TTL_SECONDS = 300
 const RATE_LIMIT_SECONDS = 20
 const MAX_VERIFY_ATTEMPTS = 5
+const MAX_CALLS_PER_MINUTE = 4
+const MAX_CALLS_PER_DAY = 30
 
 function generateOtp(): string {
   const min = Math.pow(10, OTP_LENGTH - 1)
   const max = Math.pow(10, OTP_LENGTH) - 1
   return String(Math.floor(Math.random() * (max - min + 1)) + min)
+}
+
+function generateUUID(): string {
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    const v = c === "x" ? r : (r & 0x3) | 0x8
+    return v.toString(16)
+  })
 }
 
 function normalizePhone(raw: string): string | null {
@@ -74,7 +84,7 @@ async function findUserByPhone(normalized: string) {
 }
 
 // ──────────────────────────────────────────────
-// send_otp: generate code, save to DB, initiate uCaller flash call
+// send_otp: generate fresh code, initiate uCaller flash call
 // ──────────────────────────────────────────────
 async function handleSendOtp(phone: string, mode?: string): Promise<Response> {
   const normalized = normalizePhone(phone)
@@ -92,37 +102,65 @@ async function handleSendOtp(phone: string, mode?: string): Promise<Response> {
     }
   }
 
-  const { data: recent } = await supabase
+  // --- Rate limit: 15 sec between calls to same number ---
+  const { data: recentCalls } = await supabase
     .from("phone_otps")
-    .select("created_at")
+    .select("created_at, last_call_at")
     .eq("phone", normalized)
     .eq("verified", false)
-    .gte("created_at", new Date(Date.now() - RATE_LIMIT_SECONDS * 1000).toISOString())
+    .gte("expires_at", new Date().toISOString())
     .order("created_at", { ascending: false })
     .limit(1)
 
-  if (recent && recent.length > 0) {
-    const createdAt = new Date(recent[0].created_at).getTime()
-    const waitSec = Math.ceil((RATE_LIMIT_SECONDS * 1000 - (Date.now() - createdAt)) / 1000)
-    return json({ error: `Подождите ${waitSec} сек. перед повторной отправкой.` }, 429)
+  if (recentCalls && recentCalls.length > 0) {
+    const lastCall = recentCalls[0].last_call_at || recentCalls[0].created_at
+    const elapsed = Date.now() - new Date(lastCall).getTime()
+    if (elapsed < RATE_LIMIT_SECONDS * 1000) {
+      const waitSec = Math.ceil((RATE_LIMIT_SECONDS * 1000 - elapsed) / 1000)
+      return json({ error: `Подождите ${waitSec} сек. перед повторной отправкой.` }, 429)
+    }
+  }
+
+  // --- Daily limit: 30 calls per number per day ---
+  const dayStart = new Date()
+  dayStart.setUTCHours(0, 0, 0, 0)
+  const { data: dailyCalls } = await supabase
+    .from("phone_otps")
+    .select("call_count")
+    .eq("phone", normalized)
+    .gte("created_at", dayStart.toISOString())
+
+  const totalCallsToday = (dailyCalls || []).reduce(
+    (sum, row) => sum + (row.call_count || 1), 0,
+  )
+  if (totalCallsToday >= MAX_CALLS_PER_DAY) {
+    return json({ error: "Превышен дневной лимит звонков. Попробуйте завтра." }, 429)
   }
 
   const code = generateOtp()
   const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000).toISOString()
+  const now = new Date().toISOString()
 
-  const { error: insertError } = await supabase.from("phone_otps").insert({
-    phone: normalized,
-    code,
-    expires_at: expiresAt,
-  })
+  const { data: inserted, error: insertError } = await supabase
+    .from("phone_otps")
+    .insert({
+      phone: normalized,
+      code,
+      expires_at: expiresAt,
+      call_count: 1,
+      last_call_at: now,
+    })
+    .select("id")
+    .single()
 
-  if (insertError) {
+  if (insertError || !inserted) {
     console.error("OTP insert error:", insertError)
     return json({ error: "Внутренняя ошибка. Попробуйте позже." }, 500)
   }
+  const otpId = inserted.id
 
-  // uCaller flash call: last 4 digits of the calling number = our code
   const ucallerUrl = "https://api.ucaller.ru/v1.0/initCall"
+  const uniqueId = generateUUID()
 
   try {
     const ucallerRes = await fetch(ucallerUrl, {
@@ -134,6 +172,7 @@ async function handleSendOtp(phone: string, mode?: string): Promise<Response> {
       body: JSON.stringify({
         phone: Number(normalized),
         code: Number(code),
+        unique: uniqueId,
       }),
     })
 
@@ -148,20 +187,24 @@ async function handleSendOtp(phone: string, mode?: string): Promise<Response> {
     if (ucallerJson["status"] !== true) {
       const errorCode = ucallerJson["code"] ?? "unknown"
       console.error("uCaller error:", ucallerBody)
-      await supabase
-        .from("phone_otps")
-        .delete()
-        .eq("phone", normalized)
-        .eq("code", code)
+      await supabase.from("phone_otps").delete().eq("id", otpId)
 
       if (errorCode === 18 || errorCode === 19) {
-        return json({ error: "Слишком частые запросы. Подождите немного." }, 429)
+        return json({ error: "Слишком частые запросы. Подождите 20 секунд." }, 429)
       }
       if (errorCode === 3) {
         return json({ error: "Неверный номер телефона." }, 400)
       }
       return json({ error: "Не удалось совершить звонок. Попробуйте позже." }, 502)
     }
+
+    // Store ucaller_id for tracking.
+    await supabase
+      .from("phone_otps")
+      .update({
+        ucaller_id: String(ucallerJson["ucaller_id"]),
+      })
+      .eq("id", otpId)
 
     return json({
       success: true,
@@ -170,11 +213,6 @@ async function handleSendOtp(phone: string, mode?: string): Promise<Response> {
     })
   } catch (err) {
     console.error("uCaller fetch error:", err)
-    await supabase
-      .from("phone_otps")
-      .delete()
-      .eq("phone", normalized)
-      .eq("code", code)
     return json({ error: "Ошибка связи с сервисом звонков." }, 502)
   }
 }

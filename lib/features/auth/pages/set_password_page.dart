@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/widgets/password_eye.dart';
 import '../../../data/repositories/auth_repository.dart';
 
 class SetPasswordPage extends StatefulWidget {
@@ -99,11 +100,7 @@ class _SetPasswordPageState extends State<SetPasswordPage> {
                   decoration: InputDecoration(
                     labelText: 'Пароль',
                     suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscurePassword
-                            ? Icons.visibility_off
-                            : Icons.visibility,
-                      ),
+                      icon: PasswordEyeIcon(obscured: _obscurePassword),
                       onPressed: () {
                         setState(() => _obscurePassword = !_obscurePassword);
                       },
@@ -123,11 +120,7 @@ class _SetPasswordPageState extends State<SetPasswordPage> {
                   decoration: InputDecoration(
                     labelText: 'Повторите пароль',
                     suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureConfirm
-                            ? Icons.visibility_off
-                            : Icons.visibility,
-                      ),
+                      icon: PasswordEyeIcon(obscured: _obscureConfirm),
                       onPressed: () {
                         setState(() => _obscureConfirm = !_obscureConfirm);
                       },

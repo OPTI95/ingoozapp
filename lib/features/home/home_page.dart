@@ -1,11 +1,11 @@
-import 'dart:io' show Platform;
-
-import 'package:flutter/cupertino.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../waybill/pages/waybill_form_page.dart';
+import '../../core/di/injection.dart';
+import '../../core/error/failure.dart';
+import '../../core/storage/token_storage.dart';
+import '../../core/theme/app_colors.dart';
+import '../billing/domain/repositories/billing_repository.dart';
+import '../profile/domain/repositories/profile_repository.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -16,376 +16,169 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   double? _balance;
-  bool _loading = true;
   int _promoCredits = 0;
-
-  RealtimeChannel? _profilesChannel;
-
-  String? _profileName;
-  String? _profilePhone;
-  bool _isAdmin = false;
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadBalance();
-    _subscribeToBalanceChanges();
+    _load();
   }
 
-  void _subscribeToBalanceChanges() {
-    final client = Supabase.instance.client;
-    final user = client.auth.currentUser;
-    if (user == null) return;
-
-    // Подписка на изменения баланса текущего пользователя.
-    _profilesChannel = client.channel('public:profiles')
-      ..onPostgresChanges(
-        event: PostgresChangeEvent.update,
-        schema: 'public',
-        table: 'profiles',
-        filter: PostgresChangeFilter(
-          type: PostgresChangeFilterType.eq,
-          column: 'user_id',
-          value: user.id,
-        ),
-        callback: (payload) {
-          // Как только профайл обновился (в том числе из вебхука Тинькофф) — перезагружаем баланс.
-          _loadBalance();
-        },
-      )
-      ..subscribe();
+  /// Loads balance and promo credits from the new API (best-effort — one
+  /// failing endpoint must not blank the whole screen).
+  Future<void> _load() async {
+    if (mounted) setState(() => _loading = true);
+    double balance = _balance ?? 0;
+    int credits = _promoCredits;
+    try {
+      balance = (await sl<BillingRepository>().getBalance()).amount;
+    } on Failure {
+      // keep previous/zero
+    }
+    try {
+      credits = (await sl<ProfileRepository>().getProfile()).promoWaybillsLeft;
+    } on Failure {
+      // keep previous/zero
+    }
+    if (!mounted) return;
+    setState(() {
+      _balance = balance;
+      _promoCredits = credits;
+      _loading = false;
+    });
   }
 
   Future<void> _signOut() async {
-    final client = Supabase.instance.client;
-    await client.auth.signOut();
-    await _profilesChannel?.unsubscribe();
+    await sl<TokenStorage>().clear();
     if (!mounted) return;
     Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
   }
 
-  @override
-  void dispose() {
-    _profilesChannel?.unsubscribe();
-    super.dispose();
-  }
-
   Future<void> _openPaymentMethods() async {
-    final result = await Navigator.of(context).pushNamed('/payment-methods');
-    if (result == true) {
-      _loadBalance();
-    }
+    await Navigator.of(context).pushNamed('/payment-methods');
+    if (!mounted) return;
+    _load();
   }
 
-  Future<void> _openWaybillOrProfile() async {
-    final client = Supabase.instance.client;
-    final user = client.auth.currentUser;
-    if (user == null) {
-      Navigator.of(context).pushReplacementNamed('/');
-      return;
-    }
-
-    try {
-      final profile = await client
-          .from('profiles')
-          .select(
-            'full_name, owner_snils, driver_license_number, driver_license_valid_from, driver_license_valid_to',
-          )
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-      final name = profile != null ? profile['full_name'] as String? : null;
-      final snils = profile != null ? profile['owner_snils'] as String? : null;
-      final licenseNumber = profile != null
-          ? profile['driver_license_number'] as String?
-          : null;
-      final licenseFrom = profile != null
-          ? profile['driver_license_valid_from']
-          : null;
-      final licenseTo = profile != null
-          ? profile['driver_license_valid_to']
-          : null;
-      final incomplete =
-          name == null ||
-          name.isEmpty ||
-          snils == null ||
-          snils.isEmpty ||
-          licenseNumber == null ||
-          licenseNumber.isEmpty ||
-          licenseFrom == null ||
-          licenseTo == null;
-
-      if (incomplete) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Перед оформлением путевого листа заполните профиль водителя: ФИО, СНИЛС, номер ВУ и даты "С/ПО".',
-            ),
-          ),
-        );
-        Navigator.of(context).pushNamed('/profile');
-        return;
-      }
-
-      // Проверяем, что у пользователя есть хотя бы один автомобиль
-      final cars = await client
-          .from('cars')
-          .select('id')
-          .eq('user_id', user.id);
-      final hasCar = cars is List && cars.isNotEmpty;
-
-      if (!hasCar) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Перед оформлением путевого листа добавьте автомобиль',
-            ),
-          ),
-        );
-        Navigator.of(context).pushNamed('/cars');
-        return;
-      }
-
-      final proceed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Проверка времени'),
-          content: const Text(
-            'Время путевого листа берётся из времени вашего устройства. '
-            'Проверьте, что дата и время на телефоне установлены правильно.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Продолжить'),
-            ),
-          ],
+  Future<void> _openWaybill() async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Проверка времени'),
+        content: const Text(
+          'Время путевого листа берётся из времени вашего устройства. '
+          'Проверьте, что дата и время на телефоне установлены правильно.',
         ),
-      );
-      if (proceed != true || !mounted) return;
-
-      if (!mounted) return;
-      await Navigator.of(
-        context,
-      ).push(MaterialPageRoute(builder: (_) => const WaybillFormPage()));
-      if (!mounted) return;
-      _loadBalance();
-    } catch (_) {
-      if (!mounted) return;
-      // В случае ошибки запроса просто отправим в профиль, чтобы пользователь мог проверить данные
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Не удалось проверить профиль, откройте и проверьте данные',
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Отмена'),
           ),
-        ),
-      );
-      Navigator.of(context).pushNamed('/profile');
-    }
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Продолжить'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+    await Navigator.of(context).pushNamed('/waybill');
+    if (!mounted) return;
+    _load();
   }
 
-  Future<void> _loadBalance() async {
-    try {
-      final client = Supabase.instance.client;
-      final user = client.auth.currentUser;
-      if (kDebugMode) {
-        debugPrint('USER_ID: ${user?.id}');
-        debugPrint(
-          'USER_ACCESS_TOKEN: ${client.auth.currentSession?.accessToken}',
-        );
-      }
-      if (user == null) {
-        setState(() {
-          _balance = 0;
-          _loading = false;
-        });
-        return;
-      }
-
-      final response = await client
-          .from('profiles')
-          .select('balance, full_name, phone, is_admin, promo_waybills_left')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-      double parsedBalance = 0;
-      String? nameValue;
-      String? phoneValue;
-      int promoValue = 0;
-
-      if (response != null) {
-        final rawBalance = response['balance'];
-        if (rawBalance is num) {
-          parsedBalance = rawBalance.toDouble();
-        } else if (rawBalance is String) {
-          parsedBalance = double.tryParse(rawBalance) ?? 0;
-        }
-        nameValue = response['full_name'] as String?;
-        phoneValue = response['phone'] as String?;
-        final adminValue = response['is_admin'];
-        _isAdmin = adminValue is bool && adminValue;
-        final promoRaw = response['promo_waybills_left'];
-        if (promoRaw is int) {
-          promoValue = promoRaw;
-        } else if (promoRaw is num) {
-          promoValue = promoRaw.toInt();
-        }
-      }
-
-      setState(() {
-        _balance = parsedBalance;
-        _loading = false;
-        _profileName = nameValue;
-        _profilePhone = phoneValue;
-        _promoCredits = promoValue;
-      });
-    } catch (_) {
-      setState(() {
-        _balance = 0;
-        _loading = false;
-      });
-    }
-  }
+  String get _balanceText =>
+      _loading ? '...' : (_balance?.toStringAsFixed(0) ?? '0');
 
   void _openMenu() {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      backgroundColor: const Color(0xFFF1F1F5),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
-          child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.85,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(sheetContext).size.height * 0.85,
+            ),
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              shrinkWrap: true,
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
               children: [
                 Align(
                   alignment: Alignment.centerLeft,
                   child: TextButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('Закрыть'),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Профиль'),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/profile');
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Пополнить счёт'),
-                    trailing: Text(
-                      _loading
-                          ? '... ₽'
-                          : '${_balance?.toStringAsFixed(0) ?? '0'} ₽',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    onTap: () async {
-                      Navigator.of(context).pop();
-                      await _openPaymentMethods();
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Автомобили'),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/cars');
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Промокод'),
-                    subtitle: Text('Подарочных: $_promoCredits шт.'),
-                    onTap: () async {
-                      Navigator.of(context).pop();
-                      await Navigator.of(context).pushNamed('/promo');
-                      if (!mounted) return;
-                      _loadBalance();
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Памятка'),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/guide');
-                    },
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Контакты'),
-                    onTap: () {
-                      Navigator.of(context).pop();
-                      Navigator.of(context).pushNamed('/contacts');
-                    },
-                  ),
-                ),
-                if (_isAdmin) ...[
-                  const SizedBox(height: 8),
-                  Card(
-                    child: ListTile(
-                      title: const Text('Админ: печати'),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        Navigator.of(context).pushNamed('/admin-stamps');
-                      },
+                    onPressed: () => Navigator.of(sheetContext).pop(),
+                    child: const Text(
+                      'Закрыть',
+                      style: TextStyle(fontWeight: FontWeight.w600),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: ListTile(
-                      title: const Text('Админ: путевые листы'),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        Navigator.of(context).pushNamed('/admin-waybills');
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: ListTile(
-                      title: const Text('Админ: промокоды'),
-                      onTap: () {
-                        Navigator.of(context).pop();
-                        Navigator.of(context).pushNamed('/admin-promo');
-                      },
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 8),
-                Card(
-                  child: ListTile(
-                    title: const Text('Выйти'),
-                    onTap: () async {
-                      Navigator.of(context).pop();
-                      await _signOut();
-                    },
-                  ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 4),
+                _menuCard(
+                  title: 'Профиль',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).pushNamed('/profile');
+                  },
+                ),
+                _menuCard(
+                  title: 'Пополнить счёт',
+                  trailing: Text(
+                    '$_balanceText ₽',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textGrey,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _openPaymentMethods();
+                  },
+                ),
+                _menuCard(
+                  title: 'Автомобили',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).pushNamed('/cars');
+                  },
+                ),
+                _menuCard(
+                  title: 'Промокод',
+                  subtitle: 'Подарочных: $_promoCredits шт.',
+                  onTap: () async {
+                    Navigator.of(sheetContext).pop();
+                    await Navigator.of(context).pushNamed('/promo');
+                    if (!mounted) return;
+                    _load();
+                  },
+                ),
+                _menuCard(
+                  title: 'Памятка',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).pushNamed('/guide');
+                  },
+                ),
+                _menuCard(
+                  title: 'Контакты',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).pushNamed('/contacts');
+                  },
+                ),
+                _menuCard(
+                  title: 'Выйти',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    _signOut();
+                  },
+                ),
               ],
             ),
           ),
@@ -394,157 +187,160 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final balanceText = _loading
-        ? '... ₽'
-        : '${_balance?.toStringAsFixed(0) ?? '0'} ₽';
-
-    final isIOS = Platform.isIOS;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFFAD429),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return RefreshIndicator(
-              onRefresh: _loadBalance,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: SizedBox(
-                  height: constraints.maxHeight,
-                  child: Stack(
+  Widget _menuCard({
+    required String title,
+    String? subtitle,
+    Widget? trailing,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Center big button
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: SizedBox(
-                            width: 280,
-                            height: 58,
-                            child: FilledButton(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: const Color(0xFF00C853),
-                                foregroundColor: Colors.white,
-                                elevation: 4,
-                                shadowColor: Colors.black26,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 14,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                textStyle: const TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.6,
-                                ),
-                              ),
-                              onPressed: _openWaybillOrProfile,
-                              child: const Text('ВЫПУСТИТЬ ЭПЛ'),
-                            ),
-                          ),
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
-                      // Top controls
-                      Positioned(
-                        top: 16,
-                        left: 16,
-                        child: isIOS
-                            ? Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(24),
-                                  boxShadow: const [
-                                    BoxShadow(
-                                      color: Colors.black12,
-                                      blurRadius: 6,
-                                      offset: Offset(0, 3),
-                                    ),
-                                  ],
-                                ),
-                                child: CupertinoButton(
-                                  padding: const EdgeInsets.all(10),
-                                  onPressed: _openMenu,
-                                  child: const Icon(
-                                    CupertinoIcons.line_horizontal_3,
-                                  ),
-                                ),
-                              )
-                            : Material(
-                                color: Colors.white,
-                                shape: const CircleBorder(),
-                                elevation: 2,
-                                child: InkWell(
-                                  customBorder: const CircleBorder(),
-                                  onTap: _openMenu,
-                                  child: const Padding(
-                                    padding: EdgeInsets.all(12),
-                                    child: Icon(Icons.menu),
-                                  ),
-                                ),
-                              ),
-                      ),
-                      Positioned(
-                        top: 16,
-                        left: 0,
-                        right: 0,
-                        child: Center(
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(24),
-                              boxShadow: const [
-                                BoxShadow(
-                                  color: Colors.black12,
-                                  blurRadius: 4,
-                                  offset: Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  balanceText,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                isIOS
-                                    ? CupertinoButton(
-                                        padding: EdgeInsets.zero,
-                                        onPressed: _openPaymentMethods,
-                                        child: const Icon(
-                                          CupertinoIcons.add_circled_solid,
-                                          color: CupertinoColors.activeGreen,
-                                        ),
-                                      )
-                                    : InkWell(
-                                        onTap: _openPaymentMethods,
-                                        child: const Icon(
-                                          Icons.add,
-                                          color: Colors.green,
-                                        ),
-                                      ),
-                              ],
-                            ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textGrey,
                           ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
+                if (trailing != null) trailing,
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.yellow,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // Big "issue waybill" button.
+            Align(
+              alignment: const Alignment(0, 0.3),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.green,
+                      foregroundColor: Colors.white,
+                      elevation: 3,
+                      shadowColor: Colors.black26,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      textStyle: const TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    onPressed: _openWaybill,
+                    child: const Text('ВЫПУСТИТЬ ЭПЛ'),
+                  ),
+                ),
               ),
-            );
-          },
+            ),
+
+            // Top-left menu button.
+            Positioned(
+              top: 12,
+              left: 16,
+              child: Material(
+                color: Colors.white,
+                shape: const CircleBorder(),
+                elevation: 2,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: _openMenu,
+                  child: const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Icon(Icons.menu, color: Colors.black87),
+                  ),
+                ),
+              ),
+            ),
+
+            // Top-center balance pill.
+            Positioned(
+              top: 12,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Material(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(24),
+                  elevation: 2,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(24),
+                    onTap: _openPaymentMethods,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _balanceText,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          const Text(
+                            '₽',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: AppColors.green,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          const Icon(Icons.add, color: AppColors.green),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

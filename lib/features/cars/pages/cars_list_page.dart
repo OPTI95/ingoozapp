@@ -1,131 +1,191 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../../data/models/car_model.dart';
-import '../../../data/repositories/car_repository.dart';
+import '../../../core/di/injection.dart';
+import '../../../core/widgets/app_back_button.dart';
+import '../../vehicles/domain/entities/vehicle.dart';
+import '../../vehicles/presentation/bloc/vehicles_bloc.dart';
 import 'car_form_page.dart';
 
-class CarsListPage extends StatefulWidget {
+class CarsListPage extends StatelessWidget {
   const CarsListPage({super.key});
 
   @override
-  State<CarsListPage> createState() => _CarsListPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider<VehiclesBloc>(
+      create: (_) => sl<VehiclesBloc>()..add(const VehiclesLoadRequested()),
+      child: const _CarsListView(),
+    );
+  }
 }
 
-class _CarsListPageState extends State<CarsListPage> {
-  late final CarRepository _repository;
-  List<CarModel> _cars = [];
-  bool _loading = true;
+class _CarsListView extends StatelessWidget {
+  const _CarsListView();
 
-  @override
-  void initState() {
-    super.initState();
-    _repository = SupabaseCarRepository(Supabase.instance.client);
-    _loadCars();
-  }
-
-  Future<void> _loadCars() async {
-    setState(() => _loading = true);
-    final cars = await _repository.fetchCars();
-    setState(() {
-      _cars = cars;
-      _loading = false;
-    });
-  }
-
-  Future<void> _openForm({CarModel? car}) async {
+  Future<void> _openForm(BuildContext context, {Vehicle? vehicle}) async {
     final result = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(builder: (_) => CarFormPage(car: car)),
+      MaterialPageRoute(builder: (_) => CarFormPage(vehicle: vehicle)),
     );
-    if (result == true) {
-      _loadCars();
+    if (result == true && context.mounted) {
+      context.read<VehiclesBloc>().add(const VehiclesLoadRequested());
     }
   }
 
-  Future<void> _confirmDelete(CarModel car) async {
+  Future<void> _confirmDelete(BuildContext context, Vehicle vehicle) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         title: const Text('Удалить автомобиль?'),
-        content: Text('Вы действительно хотите удалить ${car.displayName.isEmpty ? car.plateNumber : car.displayName}?'),
+        content: Text(
+          'Вы действительно хотите удалить ${vehicle.title}?',
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.of(ctx).pop(false),
             child: const Text('Отмена'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Удалить'),
           ),
         ],
       ),
     );
-
-    if (confirmed == true) {
-      await _repository.deleteCar(car.id);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Автомобиль удалён')),
-      );
-      _loadCars();
+    if (confirmed == true && context.mounted && vehicle.id != null) {
+      context.read<VehiclesBloc>().add(VehicleDeleteRequested(vehicle.id!));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Автомобили')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.separated(
-              padding: const EdgeInsets.all(16),
-              itemBuilder: (context, index) {
-                final car = _cars[index];
-                final title = car.displayName.isEmpty ? car.plateNumber : car.displayName;
-                return Card(
-                  margin: EdgeInsets.zero,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: () => _openForm(car: car),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(title, style: Theme.of(context).textTheme.bodyLarge),
-                                const SizedBox(height: 4),
-                                Text(car.plateNumber, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.grey)),
-                              ],
-                            ),
+      appBar: AppBar(
+        leading: const AppBackButton(),
+        title: const Text('Автомобили'),
+      ),
+      body: BlocConsumer<VehiclesBloc, VehiclesState>(
+        listenWhen: (prev, curr) => curr.actionError != null,
+        listener: (context, state) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.actionError!)),
+          );
+        },
+        builder: (context, state) {
+          if (state.status == VehiclesStatus.loading &&
+              state.vehicles.isEmpty) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (state.status == VehiclesStatus.failure &&
+              state.vehicles.isEmpty) {
+            return _ErrorView(
+              message: state.errorMessage ?? 'Не удалось загрузить список',
+              onRetry: () => context
+                  .read<VehiclesBloc>()
+                  .add(const VehiclesLoadRequested()),
+            );
+          }
+          if (state.vehicles.isEmpty) {
+            return const Center(child: Text('Автомобилей пока нет'));
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: state.vehicles.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final vehicle = state.vehicles[index];
+              return Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _openForm(context, vehicle: vehicle),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                vehicle.title,
+                                style: Theme.of(context).textTheme.bodyLarge,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                vehicle.plateNumber,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(color: Colors.grey),
+                              ),
+                            ],
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.edit_outlined),
-                            tooltip: 'Редактировать',
-                            onPressed: () => _openForm(car: car),
+                        ),
+                        IconButton(
+                          icon: SvgPicture.asset(
+                            'assets/svg/ic-pencil.svg',
+                            width: 21,
+                            height: 21,
                           ),
-                          IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Удалить',
-                            onPressed: () => _confirmDelete(car),
+                          tooltip: 'Редактировать',
+                          onPressed: () =>
+                              _openForm(context, vehicle: vehicle),
+                        ),
+                        IconButton(
+                          icon: SvgPicture.asset(
+                            'assets/svg/ic-trash.svg',
+                            width: 21,
+                            height: 21,
                           ),
-                        ],
-                      ),
+                          tooltip: 'Удалить',
+                          onPressed: () => _confirmDelete(context, vehicle),
+                        ),
+                      ],
                     ),
                   ),
-                );
-              },
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemCount: _cars.length,
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openForm,
-        child: const Icon(Icons.add),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: Builder(
+        builder: (context) => FloatingActionButton(
+          onPressed: () => _openForm(context),
+          child: const Icon(Icons.add),
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: onRetry, child: const Text('Повторить')),
+          ],
+        ),
       ),
     );
   }

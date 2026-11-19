@@ -1,164 +1,36 @@
 import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
-import 'package:ingoozapp/core/widgets/platform_save_button.dart';
-import 'package:ingoozapp/data/models/promo_redemption.dart';
-import 'package:ingoozapp/data/repositories/promo_repository.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:ingoozapp/core/di/injection.dart';
+import 'package:ingoozapp/core/widgets/app_back_button.dart';
+import 'package:ingoozapp/core/widgets/primary_button.dart';
 
-class PromoPage extends StatefulWidget {
+import '../domain/entities/promo_redemption.dart';
+import '../presentation/bloc/promo_bloc.dart';
+
+class PromoPage extends StatelessWidget {
   const PromoPage({super.key});
 
   @override
-  State<PromoPage> createState() => _PromoPageState();
+  Widget build(BuildContext context) {
+    return BlocProvider<PromoBloc>(
+      create: (_) => sl<PromoBloc>()..add(const PromoStarted()),
+      child: const _PromoView(),
+    );
+  }
 }
 
-class _PromoPageState extends State<PromoPage> {
-  final _codeController = TextEditingController();
-  late final PromoRepository _repository;
-
-  bool _loading = true;
-  bool _redeeming = false;
-  bool _profileReady = true;
-  String? _profileHint;
-  int _promoCredits = 0;
-  List<PromoRedemption> _redemptions = const [];
+class _PromoView extends StatefulWidget {
+  const _PromoView();
 
   @override
-  void initState() {
-    super.initState();
-    _repository = PromoRepository(Supabase.instance.client);
-    _loadData();
-  }
+  State<_PromoView> createState() => _PromoViewState();
+}
 
-  Future<void> _loadData() async {
-    setState(() => _loading = true);
-    try {
-      final client = Supabase.instance.client;
-      final userId = client.auth.currentUser?.id;
-      if (userId == null) {
-        if (!mounted) return;
-        setState(() {
-          _profileReady = false;
-          _profileHint = 'Требуется вход в аккаунт.';
-          _promoCredits = 0;
-          _redemptions = const [];
-        });
-        return;
-      }
-      final profile = await client
-          .from('profiles')
-          .select(
-            'promo_waybills_left, full_name, owner_snils, driver_license_number, driver_license_valid_from, driver_license_valid_to',
-          )
-          .eq('user_id', userId)
-          .maybeSingle();
-      final hasProfile = profile != null;
-      final hasRequiredDriverData =
-          hasProfile &&
-          (profile['full_name'] as String?)?.trim().isNotEmpty == true &&
-          (profile['owner_snils'] as String?)?.trim().isNotEmpty == true &&
-          (profile['driver_license_number'] as String?)?.trim().isNotEmpty ==
-              true &&
-          profile['driver_license_valid_from'] != null &&
-          profile['driver_license_valid_to'] != null;
-      final credits = profile?['promo_waybills_left'];
-      final history = await _repository.fetchRedemptions();
-      if (!mounted) return;
-      setState(() {
-        _profileReady = hasRequiredDriverData;
-        _profileHint = hasRequiredDriverData
-            ? null
-            : 'Сначала заполните профиль водителя (ФИО, СНИЛС, ВУ, даты "С/ПО"), потом активируйте промокод.';
-        _promoCredits = credits is int
-            ? credits
-            : credits is num
-            ? credits.toInt()
-            : 0;
-        _redemptions = history;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось загрузить промокоды: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-    }
-  }
-
-  Future<void> _redeem() async {
-    if (!_profileReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _profileHint ??
-                'Сначала заполните профиль водителя, потом активируйте промокод.',
-          ),
-        ),
-      );
-      return;
-    }
-    final code = _codeController.text.trim();
-    if (code.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Введите промокод')));
-      return;
-    }
-    setState(() => _redeeming = true);
-    try {
-      final newCredits = await _repository.redeemCode(code);
-      if (!mounted) return;
-      _codeController.clear();
-      setState(() {
-        _promoCredits = newCredits;
-      });
-      await _loadData();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Промокод успешно активирован')),
-      );
-    } on PostgrestException catch (error) {
-      final mapped = _mapError(error);
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(mapped)));
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось активировать промокод: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _redeeming = false);
-      }
-    }
-  }
-
-  String _mapError(PostgrestException error) {
-    final msg = error.message.toUpperCase();
-    if (msg.contains('PROMO_NOT_FOUND')) {
-      return 'Промокод не найден';
-    }
-    if (msg.contains('PROMO_EXPIRED')) {
-      return 'Срок действия промокода истёк';
-    }
-    if (msg.contains('PROMO_LIMIT_REACHED')) {
-      return 'Лимит активаций промокода исчерпан';
-    }
-    if (msg.contains('PROMO_ALREADY_USED')) {
-      return 'Вы уже активировали этот промокод';
-    }
-    if (msg.contains('PROMO_REDEMPTIONS_USER_ID_FKEY') ||
-        msg.contains('VIOLATES FOREIGN KEY CONSTRAINT')) {
-      return 'Сначала заполните профиль, затем повторите активацию промокода.';
-    }
-    return 'Ошибка при активации: ${error.message}';
-  }
+class _PromoViewState extends State<_PromoView> {
+  final _codeController = TextEditingController();
 
   @override
   void dispose() {
@@ -166,45 +38,70 @@ class _PromoPageState extends State<PromoPage> {
     super.dispose();
   }
 
+  void _apply() {
+    final code = _codeController.text.trim();
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Введите промокод')),
+      );
+      return;
+    }
+    context.read<PromoBloc>().add(PromoApplied(code));
+  }
+
+  void _onState(BuildContext context, PromoState state) {
+    if (state.apply == PromoApplyStatus.success) {
+      _codeController.clear();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Промокод успешно активирован')),
+      );
+    } else if (state.apply == PromoApplyStatus.failure) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(state.errorMessage ?? 'Не удалось активировать')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final body = _loading
-        ? const Center(child: CircularProgressIndicator())
-        : RefreshIndicator(
-            onRefresh: _loadData,
+    return Scaffold(
+      appBar: AppBar(
+        leading: const AppBackButton(),
+        title: const Text('Промокоды'),
+      ),
+      body: BlocConsumer<PromoBloc, PromoState>(
+        listener: _onState,
+        builder: (context, state) {
+          if (state.status == PromoStatus.loading) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (state.status == PromoStatus.failure) {
+            return _ErrorView(
+              message: state.errorMessage ?? 'Не удалось загрузить промокоды',
+              onRetry: () =>
+                  context.read<PromoBloc>().add(const PromoStarted()),
+            );
+          }
+          return RefreshIndicator(
+            onRefresh: () async =>
+                context.read<PromoBloc>().add(const PromoStarted()),
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                _buildCreditsCard(),
+                _buildCreditsCard(state.credits),
                 const SizedBox(height: 16),
-                if (!_profileReady)
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 16),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.amber.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      _profileHint ??
-                          'Сначала заполните профиль, затем активируйте промокод.',
-                      style: const TextStyle(fontSize: 13),
-                    ),
-                  ),
-                _buildInputCard(),
+                _buildInputCard(state.isApplying),
                 const SizedBox(height: 16),
-                _buildHistoryCard(),
+                _buildHistoryCard(state.redemptions),
               ],
             ),
           );
-
-    return Scaffold(
-      appBar: AppBar(title: const Text('Промокоды')),
-      body: body,
+        },
+      ),
     );
   }
 
-  Widget _buildCreditsCard() {
+  Widget _buildCreditsCard(int credits) {
     return Card(
       elevation: Platform.isIOS ? 0 : 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -219,7 +116,7 @@ class _PromoPageState extends State<PromoPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              '$_promoCredits шт.',
+              '$credits шт.',
               style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
@@ -233,7 +130,7 @@ class _PromoPageState extends State<PromoPage> {
     );
   }
 
-  Widget _buildInputCard() {
+  Widget _buildInputCard(bool applying) {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
@@ -252,10 +149,10 @@ class _PromoPageState extends State<PromoPage> {
               decoration: const InputDecoration(labelText: 'Введите код'),
             ),
             const SizedBox(height: 16),
-            PlatformSaveButton(
+            PrimaryButton(
               label: 'Активировать',
-              loading: _redeeming,
-              onPressed: _profileReady ? _redeem : null,
+              loading: applying,
+              onPressed: _apply,
             ),
           ],
         ),
@@ -263,7 +160,7 @@ class _PromoPageState extends State<PromoPage> {
     );
   }
 
-  Widget _buildHistoryCard() {
+  Widget _buildHistoryCard(List<PromoRedemption> redemptions) {
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
@@ -276,20 +173,25 @@ class _PromoPageState extends State<PromoPage> {
               style: TextStyle(fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 12),
-            if (_redemptions.isEmpty)
+            if (redemptions.isEmpty)
               const Text(
                 'Вы ещё не активировали промокоды.',
                 style: TextStyle(color: Colors.black54),
               )
             else
-              ..._redemptions.map(
+              ...redemptions.map(
                 (item) => ListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(item.code),
                   subtitle: Text(
-                    'Подарено: ${item.waybillQuota} лист.\n${_formatDate(item.redeemedAt)}',
+                    'Подарено: ${item.waybillQuota} лист.\n'
+                    '${_formatDate(item.redeemedAt)}',
                   ),
-                  leading: const Icon(Icons.card_giftcard),
+                  leading: SvgPicture.asset(
+                    'assets/svg/ic-gift.svg',
+                    width: 26,
+                    height: 26,
+                  ),
                 ),
               ),
           ],
@@ -298,7 +200,35 @@ class _PromoPageState extends State<PromoPage> {
     );
   }
 
-  String _formatDate(DateTime value) {
-    return '${value.day.toString().padLeft(2, '0')}.${value.month.toString().padLeft(2, '0')}.${value.year} ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
+  String _formatDate(DateTime? value) {
+    if (value == null) return '';
+    return '${value.day.toString().padLeft(2, '0')}.'
+        '${value.month.toString().padLeft(2, '0')}.${value.year} '
+        '${value.hour.toString().padLeft(2, '0')}:'
+        '${value.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            ElevatedButton(onPressed: onRetry, child: const Text('Повторить')),
+          ],
+        ),
+      ),
+    );
   }
 }

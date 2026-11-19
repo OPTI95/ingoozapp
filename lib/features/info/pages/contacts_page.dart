@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/widgets/app_back_button.dart';
+
 class ContactItem {
   const ContactItem({
     required this.title,
@@ -38,7 +40,10 @@ class ContactsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Контакты')),
+      appBar: AppBar(
+        leading: const AppBackButton(),
+        title: const Text('Контакты'),
+      ),
       body: ListView.separated(
         padding: const EdgeInsets.all(16),
         itemCount: _sections.length,

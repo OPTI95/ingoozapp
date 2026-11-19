@@ -1,6 +1,21 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../../core/di/injection.dart';
+import '../../../core/error/failure.dart';
+import '../../../core/theme/app_colors.dart';
+import '../../../core/widgets/app_back_button.dart';
+import '../../auth/domain/repositories/auth_repository.dart';
+import '../domain/repositories/profile_repository.dart';
+
+/// "Безопасность" — смена email и пароля.
+///
+/// Note: пока в новом API нет эндпоинтов для смены email и пароля. UI собран
+/// по дизайну, а сабмит показывает пользователю короткое сообщение «Функция
+/// временно недоступна». Когда бэк добавит эндпоинты
+/// (например, `POST /auth/email/change/` и `POST /auth/password/change/`),
+/// заменим заглушку `_notImplemented(...)` на реальный вызов через
+/// `AuthRepository` / `AuthBloc`.
 class SecuritySettingsPage extends StatefulWidget {
   const SecuritySettingsPage({super.key});
 
@@ -11,43 +26,25 @@ class SecuritySettingsPage extends StatefulWidget {
 class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
   final _emailFormKey = GlobalKey<FormState>();
   final _passwordFormKey = GlobalKey<FormState>();
-  
+
   final _newEmailController = TextEditingController();
   final _currentPasswordController = TextEditingController();
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  
-  bool _emailLoading = false;
-  bool _passwordLoading = false;
+
   bool _obscureCurrentPassword = true;
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
-  
-  String? _currentEmail;
 
-  String _friendlyError(Object error) {
-    final raw = error.toString();
-    final lower = raw.toLowerCase();
-    if (lower.contains('этот email уже используется') ||
-        lower.contains('already') && lower.contains('email')) {
-      return 'Этот email уже используется другим аккаунтом.';
-    }
-    if (lower.contains('нет активного запроса')) {
-      return 'Нет активного запроса смены email. Отправьте запрос снова.';
-    }
-    if (lower.contains('ссылка устарела') || lower.contains('expired')) {
-      return 'Ссылка подтверждения устарела. Отправьте запрос снова.';
-    }
-    if (lower.contains('unauthorized') || lower.contains('missing auth token')) {
-      return 'Сессия истекла. Войдите заново и повторите.';
-    }
-    return 'Операция не выполнена. Попробуйте ещё раз.';
-  }
+  String? _currentEmail;
+  bool _loadingProfile = true;
+  bool _submittingEmail = false;
+  bool _submittingPassword = false;
 
   @override
   void initState() {
     super.initState();
-    _currentEmail = Supabase.instance.client.auth.currentUser?.email;
+    _loadCurrentEmail();
   }
 
   @override
@@ -59,186 +56,84 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
     super.dispose();
   }
 
-  Future<void> _changeEmail() async {
-    if (!_emailFormKey.currentState!.validate()) return;
-    
-    setState(() => _emailLoading = true);
-    
+  Future<void> _loadCurrentEmail() async {
     try {
-      final client = Supabase.instance.client;
-      final currentEmail = _currentEmail;
-      if (currentEmail == null || currentEmail.isEmpty) {
-        throw Exception('Текущий email не найден');
-      }
-      final newEmail = _newEmailController.text.trim().toLowerCase();
-      
-      // Проверяем, не занят ли email
-      final existingUser = await client
-          .rpc('check_email_status', params: {'user_email': newEmail});
-      
-      if (existingUser.isNotEmpty && existingUser[0]['email_exists'] == true) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Этот email уже используется другим пользователем'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        setState(() => _emailLoading = false);
-        return;
-      }
-      
-      // Создаём запрос на смену email в Edge Function.
-      final requestResp = await client.functions.invoke(
-        'email-change',
-        body: {
-          'action': 'request',
-          'new_email': newEmail,
-        },
-      );
-      if (requestResp.status < 200 || requestResp.status >= 300) {
-        final err = requestResp.data is Map
-            ? (requestResp.data['error'] ?? requestResp.data.toString())
-            : 'Не удалось создать запрос';
-        throw Exception(err);
-      }
-      final requestId = requestResp.data is Map
-          ? requestResp.data['request_id'] as String?
-          : null;
-      final confirmToken = requestResp.data is Map
-          ? requestResp.data['confirm_token'] as String?
-          : null;
-      if (requestId == null || requestId.isEmpty) {
-        throw Exception('Не удалось получить request_id');
-      }
-      if (confirmToken == null || confirmToken.isEmpty) {
-        throw Exception('Не удалось получить confirm_token');
-      }
-
-      // Отправляем письмо подтверждения ТОЛЬКО на старую почту.
-      await client.auth.signInWithOtp(
-        email: currentEmail,
-        shouldCreateUser: false,
-        emailRedirectTo:
-            'ingoozapp://email-change-confirm?request_id=$requestId&confirm_token=$confirmToken',
-      );
-      
+      final profile = await sl<ProfileRepository>().getProfile();
       if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Письмо подтверждения отправлено на старую почту: $currentEmail',
-          ),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 5),
-        ),
-      );
-
-      _newEmailController.clear();
-      setState(() => _emailLoading = false);
-    } on AuthException catch (e) {
+      setState(() {
+        _currentEmail = profile.email;
+        _loadingProfile = false;
+      });
+    } on Failure {
       if (!mounted) return;
-      setState(() => _emailLoading = false);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ошибка: ${e.message}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } catch (e) {
+      setState(() => _loadingProfile = false);
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _changeEmail() async {
+    if (_submittingEmail) return;
+    if (!_emailFormKey.currentState!.validate()) return;
+    final newEmail = _newEmailController.text.trim();
+    setState(() => _submittingEmail = true);
+    try {
+      final user = await sl<AuthRepository>().changeEmail(newEmail);
       if (!mounted) return;
-      setState(() => _emailLoading = false);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ошибка: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      setState(() {
+        _currentEmail = user.email ?? newEmail;
+        _newEmailController.clear();
+      });
+      _showSnack('Email обновлён');
+    } on Failure catch (f) {
+      if (!mounted) return;
+      _showSnack(f.message);
+    } finally {
+      if (mounted) setState(() => _submittingEmail = false);
     }
   }
 
   Future<void> _changePassword() async {
+    if (_submittingPassword) return;
     if (!_passwordFormKey.currentState!.validate()) return;
-    
-    setState(() => _passwordLoading = true);
-    
+    setState(() => _submittingPassword = true);
     try {
-      final client = Supabase.instance.client;
-      final email = _currentEmail;
-      if (email == null || email.isEmpty) {
-        throw Exception('Текущий email не найден');
-      }
-      // Проверяем текущий пароль перед изменением.
-      await client.auth.signInWithPassword(
-        email: email,
-        password: _currentPasswordController.text.trim(),
+      await sl<AuthRepository>().changePassword(
+        oldPassword: _currentPasswordController.text,
+        newPassword: _newPasswordController.text,
       );
-      // Обновляем пароль
-      await client.auth.updateUser(
-        UserAttributes(
-          password: _newPasswordController.text.trim(),
-        ),
-      );
-      
       if (!mounted) return;
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Row(
-            children: [
-              Icon(Icons.check_circle, color: Colors.white),
-              SizedBox(width: 12),
-              Text('Пароль успешно изменён!'),
-            ],
-          ),
-          backgroundColor: Colors.green,
-        ),
-      );
-      
-      // Очищаем поля
       _currentPasswordController.clear();
       _newPasswordController.clear();
       _confirmPasswordController.clear();
-      
-      setState(() => _passwordLoading = false);
-    } on AuthException catch (e) {
+      _showSnack('Пароль обновлён');
+    } on Failure catch (f) {
       if (!mounted) return;
-      setState(() => _passwordLoading = false);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ошибка: ${e.message}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _passwordLoading = false);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Ошибка: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      _showSnack(f.message);
+    } finally {
+      if (mounted) setState(() => _submittingPassword = false);
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
+        leading: const AppBackButton(),
         title: const Text('Безопасность'),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Секция смены email
+          // Секция смены email.
           Card(
+            elevation: 0,
+            color: AppColors.cardBg,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Form(
@@ -246,11 +141,15 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
-                        Icon(Icons.email, color: Colors.orange),
-                        SizedBox(width: 12),
-                        Text(
+                        SvgPicture.asset(
+                          'assets/svg/ic-mail.svg',
+                          width: 24,
+                          height: 24,
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
                           'Сменить email',
                           style: TextStyle(
                             fontSize: 18,
@@ -274,7 +173,11 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                           ),
                           Expanded(
                             child: Text(
-                              _currentEmail ?? 'Не указан',
+                              _loadingProfile
+                                  ? '...'
+                                  : ((_currentEmail ?? '').isEmpty
+                                      ? 'Не указан'
+                                      : _currentEmail!),
                               style: const TextStyle(color: Colors.grey),
                             ),
                           ),
@@ -285,19 +188,29 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                     TextFormField(
                       controller: _newEmailController,
                       keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: 'Новый email',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.alternate_email),
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        prefixIcon: Padding(
+                          padding: const EdgeInsets.all(13),
+                          child: SvgPicture.asset(
+                            'assets/svg/ic-at.svg',
+                            width: 20,
+                            height: 20,
+                          ),
+                        ),
                       ),
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Введите новый email';
-                        }
-                        if (!RegExp(r'^[\w\.-]+@[\w\.-]+\.\w+$').hasMatch(value)) {
+                        final v = value?.trim() ?? '';
+                        if (v.isEmpty) return 'Введите новый email';
+                        if (!RegExp(r'^[\w\.-]+@[\w\.-]+\.\w+$').hasMatch(v)) {
                           return 'Неверный формат email';
                         }
-                        if (value.trim() == _currentEmail) {
+                        if (v == _currentEmail) {
                           return 'Новый email совпадает с текущим';
                         }
                         return null;
@@ -307,19 +220,27 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: _emailLoading ? null : _changeEmail,
-                        icon: _emailLoading
+                        onPressed: _submittingEmail ? null : _changeEmail,
+                        icon: _submittingEmail
                             ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
-                            : const Icon(Icons.send),
-                        label: Text(_emailLoading ? 'Отправка...' : 'Сменить email'),
+                            : SvgPicture.asset(
+                                'assets/svg/ic-send.svg',
+                                width: 18,
+                                height: 18,
+                              ),
+                        label: const Text('Сменить email'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
+                          backgroundColor: AppColors.orange,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          minimumSize: const Size.fromHeight(52),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                       ),
                     ),
@@ -328,11 +249,16 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
               ),
             ),
           ),
-          
+
           const SizedBox(height: 24),
-          
-          // Секция смены пароля
+
+          // Секция смены пароля.
           Card(
+            elevation: 0,
+            color: AppColors.cardBg,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Form(
@@ -340,11 +266,19 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Row(
+                    Row(
                       children: [
-                        Icon(Icons.lock, color: Colors.blue),
-                        SizedBox(width: 12),
-                        Text(
+                        SvgPicture.asset(
+                          'assets/svg/ic-lock.svg',
+                          width: 24,
+                          height: 24,
+                          colorFilter: const ColorFilter.mode(
+                            AppColors.brightBlue,
+                            BlendMode.srcIn,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
                           'Сменить пароль',
                           style: TextStyle(
                             fontSize: 18,
@@ -354,51 +288,23 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                       ],
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    _passwordField(
                       controller: _currentPasswordController,
-                      obscureText: _obscureCurrentPassword,
-                      decoration: InputDecoration(
-                        labelText: 'Текущий пароль',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.lock_clock_outlined),
-                        suffixIcon: IconButton(
-                          onPressed: () {
-                            setState(
-                              () => _obscureCurrentPassword =
-                                  !_obscureCurrentPassword,
-                            );
-                          },
-                          icon: Icon(
-                            _obscureCurrentPassword
-                                ? Icons.visibility
-                                : Icons.visibility_off,
-                          ),
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Введите текущий пароль';
-                        }
-                        return null;
-                      },
+                      label: 'Текущий пароль',
+                      obscured: _obscureCurrentPassword,
+                      onToggle: () => setState(() =>
+                          _obscureCurrentPassword = !_obscureCurrentPassword),
+                      validator: (value) => (value == null || value.isEmpty)
+                          ? 'Введите текущий пароль'
+                          : null,
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    _passwordField(
                       controller: _newPasswordController,
-                      obscureText: _obscureNewPassword,
-                      decoration: InputDecoration(
-                        labelText: 'Новый пароль',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          onPressed: () {
-                            setState(() => _obscureNewPassword = !_obscureNewPassword);
-                          },
-                          icon: Icon(
-                            _obscureNewPassword ? Icons.visibility : Icons.visibility_off,
-                          ),
-                        ),
-                      ),
+                      label: 'Новый пароль',
+                      obscured: _obscureNewPassword,
+                      onToggle: () => setState(
+                          () => _obscureNewPassword = !_obscureNewPassword),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Введите новый пароль';
@@ -410,22 +316,12 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                       },
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    _passwordField(
                       controller: _confirmPasswordController,
-                      obscureText: _obscureConfirmPassword,
-                      decoration: InputDecoration(
-                        labelText: 'Подтвердите новый пароль',
-                        border: const OutlineInputBorder(),
-                        prefixIcon: const Icon(Icons.lock_outline),
-                        suffixIcon: IconButton(
-                          onPressed: () {
-                            setState(() => _obscureConfirmPassword = !_obscureConfirmPassword);
-                          },
-                          icon: Icon(
-                            _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
-                          ),
-                        ),
-                      ),
+                      label: 'Подтвердите новый пароль',
+                      obscured: _obscureConfirmPassword,
+                      onToggle: () => setState(() => _obscureConfirmPassword =
+                          !_obscureConfirmPassword),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Подтвердите новый пароль';
@@ -440,19 +336,23 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: _passwordLoading ? null : _changePassword,
-                        icon: _passwordLoading
+                        onPressed: _submittingPassword ? null : _changePassword,
+                        icon: _submittingPassword
                             ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
                               )
                             : const Icon(Icons.check),
-                        label: Text(_passwordLoading ? 'Изменение...' : 'Сменить пароль'),
+                        label: const Text('Сменить пароль'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
+                          backgroundColor: AppColors.brightBlue,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          minimumSize: const Size.fromHeight(52),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
                       ),
                     ),
@@ -463,6 +363,48 @@ class _SecuritySettingsPageState extends State<SecuritySettingsPage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _passwordField({
+    required TextEditingController controller,
+    required String label,
+    required bool obscured,
+    required VoidCallback onToggle,
+    required String? Function(String?) validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      obscureText: obscured,
+      decoration: InputDecoration(
+        labelText: label,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        filled: true,
+        fillColor: Colors.white,
+        prefixIcon: Padding(
+          padding: const EdgeInsets.all(13),
+          child: SvgPicture.asset(
+            'assets/svg/ic-lock.svg',
+            width: 20,
+            height: 20,
+            colorFilter: const ColorFilter.mode(
+              AppColors.iconGrey,
+              BlendMode.srcIn,
+            ),
+          ),
+        ),
+        suffixIcon: IconButton(
+          onPressed: onToggle,
+          icon: SvgPicture.asset(
+            obscured ? 'assets/svg/ic-eye.svg' : 'assets/svg/eye.svg',
+            width: 21,
+            height: 21,
+          ),
+        ),
+      ),
+      validator: validator,
     );
   }
 }
